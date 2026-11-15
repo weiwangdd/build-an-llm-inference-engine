@@ -315,3 +315,49 @@ const st_tensor *st_find(const st_file *f, const char *name) {
     st_tensor key = { .name = (char *)name };
     return bsearch(&key, f->tensors, f->count, sizeof *f->tensors, by_name);
 }
+
+/* ---------- 多个分片 ---------- */
+
+static int by_name_ptr(const void *a, const void *b) {
+    return strcmp((*(const st_tensor *const *)a)->name, (*(const st_tensor *const *)b)->name);
+}
+
+int st_set_open(st_set *s, const char *const *paths, size_t n, char *err, size_t errcap) {
+    memset(s, 0, sizeof *s);
+    parser ps = { .err = err, .errcap = errcap };
+    s->files = calloc(n ? n : 1, sizeof *s->files);
+    if (!s->files) return fail(&ps, "内存不足");
+    size_t total = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (st_open(&s->files[i], paths[i], err, errcap)) { st_set_close(s); return -1; }
+        s->nfiles = i + 1;
+        total += s->files[i].count;
+    }
+    s->tensors = malloc((total ? total : 1) * sizeof *s->tensors);
+    if (!s->tensors) { st_set_close(s); return fail(&ps, "内存不足"); }
+    for (size_t i = 0; i < n; i++)
+        for (size_t j = 0; j < s->files[i].count; j++)
+            s->tensors[s->count++] = &s->files[i].tensors[j];
+    qsort(s->tensors, s->count, sizeof *s->tensors, by_name_ptr);
+    for (size_t i = 1; i < s->count; i++)
+        if (strcmp(s->tensors[i - 1]->name, s->tensors[i]->name) == 0) {
+            fail(&ps, "张量名在多个分片中重复：%s", s->tensors[i]->name);
+            st_set_close(s);
+            return -1;
+        }
+    return 0;
+}
+
+void st_set_close(st_set *s) {
+    for (size_t i = 0; i < s->nfiles; i++) st_close(&s->files[i]);
+    free(s->files);
+    free(s->tensors);
+    memset(s, 0, sizeof *s);
+}
+
+const st_tensor *st_set_find(const st_set *s, const char *name) {
+    st_tensor key = { .name = (char *)name };
+    const st_tensor *kp = &key;
+    const st_tensor **hit = bsearch(&kp, s->tensors, s->count, sizeof *s->tensors, by_name_ptr);
+    return hit ? *hit : NULL;
+}
