@@ -13,7 +13,7 @@
 | 章 | 内容 | 状态 |
 | --- | --- | --- |
 | [前言](book/00-preface.md) | 目标、原则、路线 | 初稿 |
-| [第 1 章](book/01-weights.md) | 读取权重文件（safetensors） | 初稿，已在 Qwen3-4B 和 Qwen3.8-27B 权重上对拍 |
+| [第 1 章](book/01-weights.md) | 读取权重文件（safetensors） | 初稿，已在 Qwen3-4B 和 Qwen3.8-27B 的全部权重上对拍 |
 
 ## 构建与测试
 
