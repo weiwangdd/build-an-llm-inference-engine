@@ -1,0 +1,14 @@
+The quick brown fox jumps over the lazy dog. It's a well-known pangram; we'll use it anyway.
+I'm sure they're right, but you've got to check: he'd say "don't" and she'll say "won't".
+SHOUTING WORKS TOO: IT'S, THEY'RE, WE'LL, I'D, YOU'VE.
+Numbers like 3.14159, 1e-9, 0x7fff_ffff and 2,147,483,647 appear in technical text.
+Email me at someone@example.com or visit https://example.org/path?q=1&r=two#frag.
+    Indented line with four spaces, then	a tab, then trailing spaces   
+Multiple
+
+
+blank lines, and Windows line endings.
+CRLF line one
+CRLF line two
+
+after blank
