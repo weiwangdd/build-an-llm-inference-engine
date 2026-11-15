@@ -26,14 +26,27 @@ def main(out):
         ("名字/带\"引号\"和\\反斜杠\n换行😀", "U8", [5]),
         ("a", "U16", [2]), ("B", "I8", [3]), ("a.b", "U32", [1]), ("é", "I16", [2]),
     ]
-    header, blob = {"__metadata__": {"format": "pt", "note": "x{[\"]}"}}, b""
+    payloads = []
     for name, dt, shape in specs:
         n = SIZES[dt]
         for d in shape:
             n *= d
-        header[name] = {"dtype": dt, "shape": shape, "data_offsets": [len(blob), len(blob) + n]}
-        blob += bytes(rng.randrange(256) for _ in range(n))
+        payloads.append((name, dt, shape, bytes(rng.randrange(256) for _ in range(n))))
+    # CRC-32 的标准测试向量：ASCII "123456789" 的校验和是 cbf43926
+    payloads.append(("crc_check", "U8", [9], b"123456789"))
+
+    def pack(items, meta=True):
+        header, blob = ({"__metadata__": {"format": "pt", "note": "x{[\"]}"}} if meta else {}), b""
+        for name, dt, shape, data in items:
+            header[name] = {"dtype": dt, "shape": shape, "data_offsets": [len(blob), len(blob) + len(data)]}
+            blob += data
+        return header, blob
+
+    header, blob = pack(payloads)
     write(f"{out}/good.safetensors", header, blob)
+    # 同样的张量拆成两个分片，合并后必须与单文件的结果一样
+    write(f"{out}/shard-1-of-2.safetensors", *pack(payloads[0::2]))
+    write(f"{out}/shard-2-of-2.safetensors", *pack(payloads[1::2], meta=False))
     # 同一内容，但 JSON 全部用 \uXXXX 转义并加空白，考验解析器
     write(f"{out}/good_escaped.safetensors",
           json.dumps(header, ensure_ascii=True, indent=2).encode() + b"   ", blob)

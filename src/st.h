@@ -40,6 +40,19 @@ int  st_open(st_file *f, const char *path, char *err, size_t errcap);
 void st_close(st_file *f);
 
 const st_tensor *st_find(const st_file *f, const char *name);
+
+/* 一个模型的权重通常拆成多个文件（分片）。st_set 把它们合并成一张名字表。 */
+typedef struct {
+    st_file          *files;
+    size_t            nfiles;
+    const st_tensor **tensors;     /* 指向各 files[i].tensors 内部，按名字升序 */
+    size_t            count;
+} st_set;
+
+/* 打开 n 个分片。任何一个打不开，或同一个名字出现在两个分片里，都算失败。 */
+int  st_set_open(st_set *s, const char *const *paths, size_t n, char *err, size_t errcap);
+void st_set_close(st_set *s);
+const st_tensor *st_set_find(const st_set *s, const char *name);
 const char *st_dtype_name(st_dtype t);
 size_t      st_dtype_size(st_dtype t);
 
