@@ -14,13 +14,16 @@
 | --- | --- | --- |
 | [前言](book/00-preface.md) | 目标、原则、路线 | 初稿 |
 | [第 1 章](book/01-weights.md) | 读取权重文件（safetensors） | 初稿，已在 Qwen3-4B 和 Qwen3.8-27B 权重上对拍 |
+| [第 2 章](book/02-tokenizer.md) | 分词器（BPE、NFC、预分词） | 初稿，已在小词表和全部 Unicode 码点上对拍，真实词表待验收 |
 
 ## 构建与测试
 
-需要一个 C17 编译器、make 和 Python 3（只用标准库）。
+需要一个 C17 编译器、make 和 Python 3。第 1 章的测试只用 Python 标准库；第 2 章的测试要和官方分词器对拍，需要 `pip install tokenizers`。
 
 ```
-make test
+make test            # 快速测试，几秒钟
+make test-unicode    # 第 2 章：全部 Unicode 码点的穷举对拍，几分钟
+make test-real TOKENIZER=<模型目录>/tokenizer.json   # 第 2 章：在真实词表上对拍
 ```
 
 ## 许可
