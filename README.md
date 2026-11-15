@@ -22,3 +22,7 @@
 ```
 make test
 ```
+
+## 许可
+
+代码（`book/` 以外的所有文件）采用 [MIT 许可](LICENSE)。`book/` 下的正文采用 [CC BY 4.0](book/LICENSE.md)。
