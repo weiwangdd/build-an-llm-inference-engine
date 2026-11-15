@@ -9,12 +9,19 @@
 set -u
 B=$1; FX=$B/tok_fixtures; fail=0; PY=${PYTHON:-python3}
 $PY -c "import tokenizers" 2>/dev/null || { echo "FAIL 需要 Python 的 tokenizers 库：pip install tokenizers"; exit 1; }
+# 官方库在不同版本之间行为不同（例如预分词正则用的 Unicode 版本），见第 2 章“参考实现的版本”。
+$PY -c '
+import sys, tokenizers
+v = tuple(int(x) for x in tokenizers.__version__.split(".")[:3] if x.isdigit())
+print("参考实现：tokenizers", tokenizers.__version__)
+if v < (0, 21, 4):
+    print("注意：本章的测试在 tokenizers 0.21.4 到 0.23.3 上验证过；更早的版本预分词会有差异")
+'
 if [ "${2:-}" = real ]; then
     FX=$B/tok_real
     $PY tests/make_tok_fixtures.py "$FX" "$3" || exit 1
-    echo "参考实现：tokenizers $($PY -c 'import tokenizers; print(tokenizers.__version__)')"
 else
-    [ -f "$FX/tokenizer.json" ] || $PY tests/make_tok_fixtures.py "$FX" || exit 1
+    $PY tests/make_tok_fixtures.py "$FX" || exit 1   # 每次重新生成，免得用到旧版脚本留下的数据
 fi
 
 check() {  # check <名字> <模式> <输入> ：分别运行两份实现并比较

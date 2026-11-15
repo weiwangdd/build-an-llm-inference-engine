@@ -181,14 +181,22 @@ def main(out, real=None):
             if not any(a in tk.normalizer.normalize_str(s) for a in norm_added):
                 f.write(json.dumps(s) + "\n")
 
+    # 解码的例外：内容本身不是 NFC 的“归一化后匹配”附加 token。tokenizers 0.22 及以前
+    # 解码时输出原内容，0.23 起输出归一化之后的内容，两种行为都是“官方”的。我们的实现
+    # 跟 0.23，这样的 id 不进对拍，免得测试结果取决于装的是哪个版本。见第 2 章。
+    unstable = {a["id"] for a in good["added_tokens"]
+                if a["normalized"] and tk.normalizer.normalize_str(a["content"]) != a["content"]}
     n = tk.get_vocab_size(with_added_tokens=True)
+    stable = [i for i in range(n) if i not in unstable]
     with open(os.path.join(out, "ids.txt"), "w") as f:
-        for i in range(n):                                   # 每个 id 单独解码
+        for i in stable:                                     # 每个 id 单独解码
             f.write(f"{i}\n")
         for _ in range(2000):                                # 随机 id 序列
-            f.write(" ".join(str(rng.randrange(n)) for _ in range(rng.randrange(1, 30))) + "\n")
+            f.write(" ".join(str(rng.choice(stable)) for _ in range(rng.randrange(1, 30))) + "\n")
         for s in texts[:200]:                                # 编码结果再解码
-            f.write(" ".join(map(str, tk.encode(s).ids)) + "\n")
+            ids = tk.encode(s).ids
+            if not unstable.intersection(ids):
+                f.write(" ".join(map(str, ids)) + "\n")
 
     with open(os.path.join(out, "unicode.jsonl"), "w", encoding="utf-8") as f:
         for s in unicode_texts():
