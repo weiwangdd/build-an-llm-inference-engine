@@ -4,7 +4,7 @@ SAN     ?= -fsanitize=address,undefined -fno-sanitize-recover=all
 BUILD   ?= build
 PYTHON  ?= python3
 
-TOK_SRC = src/tok.c src/json.c src/unicode.c src/unicode_tables.c
+TOK_SRC = src/tok.c src/json.c src/unicode.c src/unicode_tables.c src/chat.c src/sha256.c
 
 all: $(BUILD)/st_dump $(BUILD)/tok
 
@@ -12,7 +12,7 @@ $(BUILD)/st_dump: tools/st_dump.c src/st.c src/st.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(SAN) -o $@ tools/st_dump.c src/st.c
 
-$(BUILD)/tok: tools/tok.c $(TOK_SRC) src/tok.h src/json.h src/unicode.h src/unicode_tables.h
+$(BUILD)/tok: tools/tok.c $(TOK_SRC) src/tok.h src/json.h src/unicode.h src/unicode_tables.h src/chat.h src/sha256.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(SAN) -o $@ tools/tok.c $(TOK_SRC)
 

@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 命令
 
-需要 C17 编译器、make、Python 3。第 2 章的测试需要 `tokenizers` 库（验证过 0.21.4–0.23.3）。系统 Python 通常没有它，装在虚拟环境里，用 `PYTHON=$HOME/venvs/.../bin/python` 传给所有 `make test*` 目标（`tests/run_tok.sh` 读这个环境变量；第 1 章的 `tests/run.sh` 固定用 `python3`，只需标准库）。在 zsh 里不要写 `PYTHON=~/...`，`~` 不会展开。
+需要 C17 编译器、make、Python 3。第 2 章的测试需要 `tokenizers` 库（验证过 0.21.4–0.23.3），对话模板的对拍还需要 `transformers`（没装时打印 SKIP）。系统 Python 通常没有它，装在虚拟环境里，用 `PYTHON=$HOME/venvs/.../bin/python` 传给所有 `make test*` 目标（`tests/run_tok.sh` 读这个环境变量；第 1 章的 `tests/run.sh` 固定用 `python3`，只需标准库）。在 zsh 里不要写 `PYTHON=~/...`，`~` 不会展开。
 
 ```
 make                 # 构建 build/st_dump 和 build/tok
@@ -46,7 +46,7 @@ build/tok encode build/tok_fixtures/tokenizer.json build/tok_fixtures/texts.json
 因此改 C 端的输出格式时，必须同时改对应的 Python 参考实现，反之亦然。Python 那一侧要与 C 端**独立实现**（例如 `tok_ref.py` 自己实现 byte-level 映射），否则两边可能错成一样；必要时再加一个不依赖 Python 的已知答案（如 CRC-32 测试向量）。
 
 - **第 1 章 权重（`src/st.[ch]`、`tools/st_dump.c`）**：mmap 只读解析 safetensors，`st_set` 把多个分片合并成一张按名字升序的表，跨分片重名算错误。`st_dump` 打印每个张量的 CRC-32、dtype、形状和名字。safetensors 头用 `st.c` 里的专用小 JSON 解析器。测试数据由 `tests/make_fixtures.py` 生成（含一组 `bad_*.safetensors`）。
-- **第 2 章 分词器（`src/tok.[ch]`、`src/json.[ch]`、`src/unicode*.[ch]`、`tools/tok.c`）**：流水线是“切出特殊 token → NFC → 预分词 → 字节级 BPE”，与 Hugging Face tokenizers 相同。`json.c` 是通用 JSON 解析器（与第 1 章的专用解析器分开）。`tok` 工具有 `encode/decode/nfc/pretok/roundtrip` 几种模式，文本一律以十六进制输出以避免逐行比较时的歧义，解码结果先按 Rust `from_utf8_lossy` 规则处理。`tests/make_tok_fixtures.py` 在 `tests/corpus/` 上现训练一个约 3000 token 的小词表，配置与 Qwen3.8 的 tokenizer.json 完全相同；24.8 万的真实词表通过 `make test-real` 验收。
+- **第 2 章 分词器（`src/tok.[ch]`、`src/json.[ch]`、`src/unicode*.[ch]`、`tools/tok.c`）**：流水线是“切出特殊 token → NFC → 预分词 → 字节级 BPE”，与 Hugging Face tokenizers 相同。`json.c` 是通用 JSON 解析器（与第 1 章的专用解析器分开）。`tok` 工具有 `encode/decode/nfc/pretok/roundtrip/chat` 几种模式，文本一律以十六进制输出以避免逐行比较时的歧义，解码结果先按 Rust `from_utf8_lossy` 规则处理。对话模板（`src/chat.[ch]`、`src/sha256.[ch]`）是把 Qwen3.8-27B 的 `chat_template.jinja` 手写成 C 的 `chat_render`，用 SHA-256 确认模板文件就是那一份（副本在 `tests/data/`），参考实现 `tests/chat_ref.py` 调用 transformers 的 `apply_chat_template`。`tests/make_tok_fixtures.py` 在 `tests/corpus/` 上现训练一个约 3000 token 的小词表，配置与 Qwen3.8 的 tokenizer.json 完全相同；24.8 万的真实词表通过 `make test-real` 验收。
 
 ## 约定
 
