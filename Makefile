@@ -26,7 +26,7 @@ test-unicode: $(BUILD)/tok
 	sh tests/run_tok.sh $(BUILD) unicode
 
 # 第 2 章：在真实模型的分词器上验收，例如
-#   make test-real TOKENIZER=/data/models/Qwen3.8-27B/tokenizer.json PYTHON=~/venvs/x/bin/python
+#   make test-real TOKENIZER=/data/models/Qwen3.8-27B/tokenizer.json PYTHON=$HOME/venvs/x/bin/python
 test-real: $(BUILD)/tok
 	PYTHON=$(PYTHON) sh tests/run_tok.sh $(BUILD) real $(TOKENIZER)
 
