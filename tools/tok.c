@@ -5,6 +5,9 @@
  *                                            先是保留特殊 token 的，再是跳过特殊 token 的
  *   tok nfc     texts.jsonl                  输出 NFC 归一化结果的十六进制
  *   tok pretok  texts.jsonl                  归一化并预分词，每段输出一个十六进制串
+ *   tok chat    tokenizer.json chat_template.jinja requests.jsonl
+ *                                            每行一个对话请求（见 src/chat.h），按对话模板渲染后编码；
+ *                                            输出“渲染结果的十六进制 id 序列”，模板报错的请求输出 error
  *   tok roundtrip tokenizer.json texts.jsonl 编码后再解码（保留特殊 token），输出十六进制；
  *                                            结果应当等于原文的 NFC 归一化
  *
@@ -14,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "chat.h"
 #include "json.h"
 #include "tok.h"
 #include "unicode.h"
@@ -71,12 +75,21 @@ int main(int argc, char **argv) {
         return 2;
     }
     const char *mode = argv[1];
-    int need_tok = !strcmp(mode, "encode") || !strcmp(mode, "decode") || !strcmp(mode, "roundtrip");
-    if (need_tok && argc != 4) return 2;
+    int is_chat = !strcmp(mode, "chat");
+    int need_tok = is_chat || !strcmp(mode, "encode") || !strcmp(mode, "decode") || !strcmp(mode, "roundtrip");
+    if (need_tok && argc != (is_chat ? 5 : 4)) return 2;
     tok *t = NULL;
     char err[512];
     if (need_tok && tok_load(&t, argv[2], err, sizeof err)) die("", err);
-    FILE *in = fopen(argv[need_tok ? 3 : 2], "rb");
+    if (is_chat) {                      /* 先确认模板就是我们实现的那一份 */
+        FILE *tf = fopen(argv[3], "rb");
+        if (!tf) die("打不开对话模板 ", argv[3]);
+        static char tbuf[1 << 16];
+        size_t tn = fread(tbuf, 1, sizeof tbuf, tf);
+        fclose(tf);
+        if (chat_template_check(tbuf, tn, err, sizeof err)) die("", err);
+    }
+    FILE *in = fopen(argv[is_chat ? 4 : need_tok ? 3 : 2], "rb");
     if (!in) die("打不开输入文件", "");
 
     jval v;
@@ -94,6 +107,19 @@ int main(int argc, char **argv) {
             }
             putchar('\n');
             free(ids); json_free(&v);
+        }
+    } else if (is_chat) {
+        size_t len;
+        for (char *line; (line = read_line(in, &len)); free(line)) {
+            char *text; size_t tn;
+            if (json_parse(&v, line, len, err, sizeof err)) die("输入文件：", err);
+            if (chat_render(&v, &text, &tn, err, sizeof err)) { puts("error"); json_free(&v); continue; }
+            int32_t *ids; size_t n;
+            if (tok_encode(t, (const uint8_t *)text, tn, &ids, &n, err, sizeof err)) die("", err);
+            hex((const uint8_t *)text, tn);
+            for (size_t i = 0; i < n; i++) printf(" %d", ids[i]);
+            putchar('\n');
+            free(ids); free(text); json_free(&v);
         }
     } else if (!strcmp(mode, "decode")) {
         size_t len;

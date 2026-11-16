@@ -146,6 +146,125 @@ def nfc_texts(rng, n):
         yield "".join(chr(rng.choice(pool)) for _ in range(rng.randrange(1, 12)))
 
 
+def chat_requests(rng, n):
+    """对话模板的测试请求：先是一组手写的典型对话，然后是随机拼出来的对话。
+    随机对话里有很多是模板会报错的（比如没有用户消息），两边都必须报错。"""
+    tools = [
+        {"type": "function", "function": {"name": "get_weather", "description": "查询天气",
+         "parameters": {"type": "object", "properties": {"city": {"type": "string"}, "days": {"type": "integer",
+         "minimum": 1, "maximum": 7.5}}, "required": ["city"]}}},
+        {"type": "function", "function": {"name": "calc", "description": "Evaluate \"expr\"\n\ttab",
+         "parameters": {"type": "object", "properties": {"expr": {"type": "string"}}}}},
+    ]
+    call = {"type": "function", "function": {"name": "get_weather", "arguments": {"city": "柏林", "days": 3}}}
+    fixed = [
+        {"messages": [{"role": "user", "content": "你好"}], "add_generation_prompt": True},
+        {"messages": [{"role": "user", "content": "你好"}], "add_generation_prompt": True, "enable_thinking": False},
+        {"messages": [{"role": "system", "content": "你是一个助手。"}, {"role": "user", "content": "1+1=?"}],
+         "add_generation_prompt": True, "reasoning_effort": "low"},
+        {"messages": [{"role": "system", "content": "  "}, {"role": "user", "content": "x"}], "reasoning_effort": "medium"},
+        {"messages": [{"role": "user", "content": "北京天气？"},
+                      {"role": "assistant", "content": "", "reasoning_content": "要查天气。", "tool_calls": [call]},
+                      {"role": "tool", "content": "{\"temp\": 3}"},
+                      {"role": "assistant", "content": "3 度。"}],
+         "tools": tools, "add_generation_prompt": False},
+        {"messages": [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "图里是什么？"},
+                                                    {"image_url": "x"}, {"video": "v.mp4"}]}],
+         "add_vision_id": True, "add_generation_prompt": True},
+        {"messages": [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b", "reasoning_content": "r1"},
+                      {"role": "user", "content": "c"}, {"role": "assistant", "content": "d", "reasoning_content": "r2"}],
+         "preserve_thinking": False},
+        {"messages": [{"role": "system", "content": [{"type": "image"}]}, {"role": "user", "content": "x"}]},
+        {"messages": [{"role": "user", "content": "x"}, {"role": "system", "content": "late"}]},
+        {"messages": [{"role": "tool", "content": "<tool_response>only</tool_response>"}]},
+        {"messages": []},
+        {"messages": [{"role": "user", "content": "x"}], "reasoning_effort": "max"},
+        {"messages": [{"role": "user", "content": "x"}], "reasoning_effort": None},
+        {"messages": [{"role": "user", "content": "x"}], "reasoning_effort": "max", "enable_thinking": False},
+        {"messages": [{"role": "robot", "content": "x"}]},
+        {"messages": [{"role": "user", "content": 5}]},
+        {"messages": [{"role": "user", "content": {"text": "x"}}]},
+        {"messages": [{"role": "user", "content": [{"foo": 1}]}]},
+        {"messages": [{"role": "user", "content": "x"}, {"role": "assistant", "content": "y",
+                       "tool_calls": [{"name": "f", "arguments": "{\"a\": 1}"}]}]},
+    ]
+    for r in fixed:
+        yield r
+
+    words = ["你好", " hello ", "\n\n", "<|im_end|>", "<think>x</think>", "<tool_response>r</tool_response>",
+             "\u3000全角空格\u3000", "\x1f控制字符\x1c", "émoji 😀", "", "  多行\n文本  ", "'s 'LL", "1.5e3"]
+
+    def text():
+        return "".join(rng.choice(words) for _ in range(rng.randrange(0, 4)))
+
+    def number():
+        k = rng.randrange(8)
+        if k == 0:
+            return rng.randrange(-10**20, 10**20)
+        if k == 1:
+            return rng.choice([0.1, 1e16, 1e15, 9999999999999998.0, 1e-4, 1e-5, -0.0, 5e-324,
+                               1.7976931348623157e308, 123456789.125, 0.30000000000000004, 2.5, 100.0])
+        return rng.uniform(-1, 1) * 10 ** rng.randrange(-12, 25)
+
+    def value(d=0):
+        k = rng.randrange(7 if d < 2 else 4)
+        if k == 0: return text()
+        if k == 1: return number()
+        if k == 2: return rng.choice([True, False, None])
+        if k == 3: return rng.randrange(-5, 1000)
+        if k == 4: return [value(d + 1) for _ in range(rng.randrange(3))]
+        return {rng.choice(["a", "名", "x y", "\"q\""]) + str(i): value(d + 1) for i in range(rng.randrange(3))}
+
+    def content():
+        k = rng.randrange(10)
+        if k < 6: return text()
+        if k == 6: return None
+        if k == 7: return "MISSING"
+        items = []
+        for _ in range(rng.randrange(1, 4)):
+            items.append(rng.choice([{"type": "text", "text": text()}, {"type": "image"}, {"image": "a.png"},
+                                     {"image_url": {"url": "u"}}, {"type": "video"}, {"video": "v"}, {"text": text()}]))
+        return items
+
+    def message(role):
+        m = {"role": role}
+        c = content()
+        if c != "MISSING":
+            m["content"] = c
+        if role == "assistant":
+            if rng.random() < 0.5:
+                m["reasoning_content"] = rng.choice([text(), text(), None, 3])
+            if rng.random() < 0.4:
+                calls = []
+                for _ in range(rng.randrange(0, 3)):
+                    fn = {"name": rng.choice(["get_weather", "calc", "名字"])}
+                    if rng.random() < 0.8:
+                        fn["arguments"] = rng.choice([{"k%d" % i: value() for i in range(rng.randrange(4))}, ""])
+                    calls.append({"type": "function", "function": fn} if rng.random() < 0.7 else fn)
+                m["tool_calls"] = calls
+        return m
+
+    for _ in range(n):
+        roles = [rng.choice(["user", "user", "assistant", "assistant", "tool"]) for _ in range(rng.randrange(1, 7))]
+        if rng.random() < 0.9:                         # 大多数对话至少有一条用户消息
+            roles.insert(rng.randrange(len(roles) + 1), "user")
+        if rng.random() < 0.05:                        # 偶尔把系统消息放在中间，模板会报错
+            roles.insert(rng.randrange(1, len(roles) + 1), "system")
+        msgs = [message(r) for r in roles]
+        if rng.random() < 0.5:                         # 开头的系统消息，内容通常是文本
+            msgs.insert(0, {"role": "system", "content": text() if rng.random() < 0.9 else content()})
+        req = {"messages": msgs}
+        for key, choices in [("add_generation_prompt", [True, False]), ("enable_thinking", [True, False]),
+                             ("reasoning_effort", ["xhigh", "medium", "low"]), ("preserve_thinking", [True, False]),
+                             ("add_vision_id", [True, False])]:
+            if rng.random() < 0.5:
+                req[key] = rng.choice(choices)
+        if rng.random() < 0.4:
+            req["tools"] = rng.choice([tools, tools[:1], [], [{"type": "function", "function": {"name": "t",
+                                       "parameters": value()}}]])
+        yield req
+
+
 def main(out, real=None):
     """real 为真实模型的 tokenizer.json 时，不训练小词表，也不生成坏文件，
     只针对这个分词器生成测试文本和 id。"""
@@ -197,6 +316,10 @@ def main(out, real=None):
             ids = tk.encode(s).ids
             if not unstable.intersection(ids):
                 f.write(" ".join(map(str, ids)) + "\n")
+
+    with open(os.path.join(out, "chat.jsonl"), "w", encoding="utf-8") as f:
+        for r in chat_requests(random.Random(3), 3000):
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
     with open(os.path.join(out, "unicode.jsonl"), "w", encoding="utf-8") as f:
         for s in unicode_texts():
