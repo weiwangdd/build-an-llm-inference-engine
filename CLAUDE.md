@@ -16,13 +16,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 命令
 
-需要 C17 编译器、make、Python 3。第 2 章的测试需要 `pip install tokenizers`（验证过 0.21.4–0.23.3；可用 `PYTHON=` 指定带该库的解释器）。
+需要 C17 编译器、make、Python 3。第 2 章的测试需要 `tokenizers` 库（验证过 0.21.4–0.23.3）。系统 Python 通常没有它，装在虚拟环境里，用 `PYTHON=$HOME/venvs/.../bin/python` 传给所有 `make test*` 目标（`tests/run_tok.sh` 读这个环境变量；第 1 章的 `tests/run.sh` 固定用 `python3`，只需标准库）。在 zsh 里不要写 `PYTHON=~/...`，`~` 不会展开。
 
 ```
 make                 # 构建 build/st_dump 和 build/tok
 make test            # 第 1、2 章快速测试，几秒钟
 make test-unicode    # 第 2 章：全部 Unicode 码点的归一化与预分词穷举对拍，几分钟
-make test-real TOKENIZER=<模型目录>/tokenizer.json [PYTHON=...]   # 在真实词表上验收
+make test-real TOKENIZER=<模型目录>/tokenizer.json PYTHON=...   # 在真实词表上验收
 make unicode-tables  # 从 UCD 9.0 和 16.0 重新生成 src/unicode_tables.c（下载地址见 tools/gen_unicode.c）
 ```
 

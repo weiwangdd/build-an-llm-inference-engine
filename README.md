@@ -18,13 +18,20 @@
 
 ## 构建与测试
 
-需要一个 C17 编译器、make 和 Python 3。第 1 章的测试只用 Python 标准库；第 2 章的测试要和官方分词器对拍，需要 `pip install tokenizers`。
+需要一个 C17 编译器、make 和 Python 3。第 1 章的测试只用 Python 标准库；第 2 章的测试要和官方分词器对拍，需要 Hugging Face 的 `tokenizers` 库（在 0.21.4 到 0.23.3 上验证过，更早的版本预分词会有差异）。建议装在虚拟环境里，再用 `PYTHON` 指定它：
 
 ```
-make test            # 快速测试，几秒钟
-make test-unicode    # 第 2 章：全部 Unicode 码点的穷举对拍，几分钟
-make test-real TOKENIZER=<模型目录>/tokenizer.json   # 第 2 章：在真实词表上对拍
+python3 -m venv ~/venvs/tok      # 或者 uv venv ~/venvs/tok
+~/venvs/tok/bin/pip install "tokenizers>=0.21.4,<=0.23.3"
 ```
+
+```
+make test PYTHON=$HOME/venvs/tok/bin/python            # 快速测试，几秒钟
+make test-unicode PYTHON=$HOME/venvs/tok/bin/python    # 第 2 章：全部 Unicode 码点的穷举对拍，几分钟
+make test-real TOKENIZER=<模型目录>/tokenizer.json PYTHON=$HOME/venvs/tok/bin/python   # 第 2 章：在真实词表上对拍
+```
+
+如果系统的 `python3` 已经装了 `tokenizers`，可以省略 `PYTHON=`。
 
 ## 许可
 
