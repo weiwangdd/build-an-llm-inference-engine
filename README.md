@@ -15,7 +15,7 @@
 | [前言](book/00-preface.md) | 目标、原则、路线 | 初稿 |
 | [第 1 章](book/01-weights.md) | 读取权重文件（safetensors） | 初稿，已在 Qwen3-4B 和 Qwen3.8-27B 的全部权重上对拍 |
 | [第 2 章](book/02-tokenizer.md) | 分词器（BPE、NFC、预分词、对话模板） | 初稿，已在小词表、全部 Unicode 码点和 Qwen3.8-27B 真实词表上对拍；对话模板与 transformers 对拍 |
-| [第 3 章](book/03-ops.md) | 张量与算子（矩阵乘、两种 RMSNorm、激活、softmax、RoPE、因果卷积） | 初稿，已在小输入上逐元素对拍（误差不超过 1 ulp）；真实权重上的验收待做 |
+| [第 3 章](book/03-ops.md) | 张量与算子（矩阵乘、两种 RMSNorm、激活、softmax、RoPE、因果卷积） | 初稿，已在小输入和 Qwen3.8-27B 的真实权重上逐元素对拍，误差不超过 0.5 ulp |
 
 ## 构建与测试
 
@@ -32,7 +32,7 @@ transformers 和 jinja2 只用于对话模板的对拍（transformers 不会自�
 make test PYTHON=$HOME/venvs/tok/bin/python            # 快速测试，几秒钟
 make test-unicode PYTHON=$HOME/venvs/tok/bin/python    # 第 2 章：全部 Unicode 码点的穷举对拍，几分钟
 make test-real TOKENIZER=<模型目录>/tokenizer.json PYTHON=$HOME/venvs/tok/bin/python   # 第 2 章：在真实词表上对拍
-make test-ops-real MODEL=<模型目录>                     # 第 3 章：拿真实权重当算子输入，约一分钟
+make test-ops-real MODEL=<模型目录>                     # 第 3 章：拿真实权重当算子输入，十几秒
 ```
 
 如果系统的 `python3` 已经装了 `tokenizers`，可以省略 `PYTHON=`。
