@@ -16,7 +16,7 @@
 | [第 1 章](book/01-weights.md) | 读取权重文件（safetensors） | 初稿，已在 Qwen3-4B 和 Qwen3.8-27B 的全部权重上对拍 |
 | [第 2 章](book/02-tokenizer.md) | 分词器（BPE、NFC、预分词、对话模板） | 初稿，已在小词表、全部 Unicode 码点和 Qwen3.8-27B 真实词表上对拍；对话模板与 transformers 对拍 |
 | [第 3 章](book/03-ops.md) | 张量与算子（矩阵乘、两种 RMSNorm、激活、softmax、RoPE、因果卷积） | 初稿，已在小输入和 Qwen3.8-27B 的真实权重上逐元素对拍，误差不超过 0.5 ulp |
-| [第 4 章](book/04-layer.md) | 单层前向（全注意力、门控 delta 规则的线性注意力、前馈层） | 初稿，已在随机小模型上通过两层对拍：逐步误差不超过 0.5 ulp，与官方 transformers（float64）的相对误差不超过 2.4e-4；真实权重待验收 |
+| [第 4 章](book/04-layer.md) | 单层前向（全注意力、门控 delta 规则的线性注意力、前馈层） | 初稿，已在随机小模型上通过两层对拍：逐步误差不超过 0.5 ulp，与官方 transformers（float64）的相对误差不超过 2.4e-4；在 Qwen3.8-27B 的四层真实权重上同样通过 |
 
 ## 构建与测试
 
