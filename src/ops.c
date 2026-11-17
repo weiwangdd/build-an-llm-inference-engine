@@ -3,6 +3,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 float bf16_to_f32(uint16_t h) {
@@ -85,11 +86,10 @@ void op_sigmoid(float *y, const float *x, size_t n) {
 }
 
 /* ln(1 + e^x) 直接算，x 稍大 e^x 就溢出。改写成 max(x, 0) + ln(1 + e^-|x|)，两边数学上相等。 */
+static double softplus(double v) { return fmax(v, 0.0) + log1p(exp(-fabs(v))); }
+
 void op_softplus(float *y, const float *x, size_t n) {
-    for (size_t i = 0; i < n; i++) {
-        double v = (double)x[i];
-        y[i] = (float)(fmax(v, 0.0) + log1p(exp(-fabs(v))));
-    }
+    for (size_t i = 0; i < n; i++) y[i] = (float)softplus((double)x[i]);
 }
 
 void op_softmax(float *y, const float *x, size_t n, size_t d) {
@@ -132,4 +132,87 @@ void op_conv1d(float *y, const float *x, const float *w, size_t n, size_t c, siz
             y[t * c + j] = (float)acc;
         }
     }
+}
+
+/* ---------- 第 4 章 ---------- */
+
+void op_add(float *y, const float *a, const float *b, size_t n) {
+    for (size_t i = 0; i < n; i++) y[i] = a[i] + b[i];
+}
+
+void op_mul(float *y, const float *a, const float *b, size_t n) {
+    for (size_t i = 0; i < n; i++) y[i] = a[i] * b[i];
+}
+
+void op_decay(float *g, const float *a, const float *A_log, const float *dt_bias, size_t n, size_t heads) {
+    for (size_t t = 0; t < n; t++)
+        for (size_t h = 0; h < heads; h++)
+            g[t * heads + h] = (float)(-exp((double)A_log[h]) * softplus((double)a[t * heads + h] + (double)dt_bias[h]));
+}
+
+static int oom(char *err, size_t errcap) {
+    if (err && errcap) snprintf(err, errcap, "内存不足");
+    return -1;
+}
+
+int op_attention(float *y, const float *q, const float *k, const float *v,
+                 size_t n, size_t heads, size_t kv, size_t d, double scale, char *err, size_t errcap) {
+    double *p = malloc(n * sizeof *p), *acc = malloc(d * sizeof *acc);
+    if (!p || !acc) { free(p); free(acc); return oom(err, errcap); }
+    size_t group = heads / kv;
+    for (size_t t = 0; t < n; t++) {
+        for (size_t h = 0; h < heads; h++) {
+            const float *qh = q + (t * heads + h) * d;
+            size_t g = h / group;
+            double m = -INFINITY, sum = 0;
+            for (size_t s = 0; s <= t; s++) {               /* 因果：只看位置 0 .. t */
+                const float *ks = k + (s * kv + g) * d;
+                double dot = 0;
+                for (size_t i = 0; i < d; i++) dot += (double)qh[i] * (double)ks[i];
+                p[s] = dot * scale;
+                if (p[s] > m) m = p[s];
+            }
+            for (size_t s = 0; s <= t; s++) { p[s] = exp(p[s] - m); sum += p[s]; }
+            for (size_t i = 0; i < d; i++) acc[i] = 0;
+            for (size_t s = 0; s <= t; s++) {
+                const float *vs = v + (s * kv + g) * d;
+                for (size_t i = 0; i < d; i++) acc[i] += p[s] * (double)vs[i];
+            }
+            for (size_t i = 0; i < d; i++) y[(t * heads + h) * d + i] = (float)(acc[i] / sum);
+        }
+    }
+    free(p); free(acc);
+    return 0;
+}
+
+int op_gated_delta(float *y, const float *q, const float *k, const float *v, const float *g, const float *beta,
+                   size_t n, size_t hk, size_t hv, size_t dk, size_t dv, char *err, size_t errcap) {
+    double *S = malloc(dk * dv * sizeof *S), *u = malloc(dv * sizeof *u);
+    if (!S || !u) { free(S); free(u); return oom(err, errcap); }
+    size_t group = hv / hk;
+    double scale = 1.0 / sqrt((double)dk);
+    for (size_t j = 0; j < hv; j++) {                       /* 各个值头互不相干，一个一个算 */
+        size_t kh = j / group;
+        for (size_t i = 0; i < dk * dv; i++) S[i] = 0;
+        for (size_t t = 0; t < n; t++) {
+            const float *qt = q + (t * hk + kh) * dk, *kt = k + (t * hk + kh) * dk;
+            const float *vt = v + (t * hv + j) * dv;
+            double decay = exp((double)g[t * hv + j]), b = (double)beta[t * hv + j];
+            for (size_t i = 0; i < dk * dv; i++) S[i] *= decay;
+            for (size_t c = 0; c < dv; c++) {               /* u = beta (v - Sᵀk)，S 按 [dk][dv] 存放 */
+                double pred = 0;
+                for (size_t r = 0; r < dk; r++) pred += S[r * dv + c] * (double)kt[r];
+                u[c] = b * ((double)vt[c] - pred);
+            }
+            for (size_t r = 0; r < dk; r++)
+                for (size_t c = 0; c < dv; c++) S[r * dv + c] += (double)kt[r] * u[c];
+            for (size_t c = 0; c < dv; c++) {
+                double o = 0;
+                for (size_t r = 0; r < dk; r++) o += S[r * dv + c] * (double)qt[r];
+                y[(t * hv + j) * dv + c] = (float)(o * scale);
+            }
+        }
+    }
+    free(S); free(u);
+    return 0;
 }
