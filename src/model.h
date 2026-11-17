@@ -58,4 +58,29 @@ typedef void (*trace_fn)(void *ctx, const char *name, const float *x, size_t row
 int layer_forward(float *h, size_t n, const int32_t *pos, const model_cfg *c, const layer_w *w,
                   trace_fn trace, void *ctx, char *err, size_t errcap);
 
+/* ---------- 第 5 章：整个模型 ---------- */
+
+typedef struct {
+    model_cfg cfg;
+    const uint8_t *embed;        /* 嵌入表，BF16 [vocab, hidden]，指向 mmap 区域 */
+    layer_w *layers;             /* [n_layers] */
+    float *final_norm;           /* [hidden]，1 + w 形式 */
+    bf16_mat lm_head;            /* 输出层，[vocab, hidden] */
+} model;
+
+/* 读配置，加载嵌入表、每一层、最终归一化和输出层，逐个检查名字、dtype 和形状。
+ * 权重仍然留在 s 的 mmap 里，s 要比 m 活得久。 */
+int  model_load(model *m, const char *config_path, const st_set *s, char *err, size_t errcap);
+void model_free(model *m);
+
+/* 整个模型的前向：ids 是 n 个 token，位置依次是 0 .. n-1。
+ * logits 是 [n, vocab]，第 t 行是“看过第 0 .. t 个 token 之后，下一个 token 的分数”。
+ * trace 收到的名字是 embed、layers.<i>.<第 4 章的步骤名>、final_norm、logits。 */
+int  model_forward(const model *m, const int32_t *ids, size_t n, float *logits,
+                   trace_fn trace, void *ctx, char *err, size_t errcap);
+
+/* 贪心解码选哪个 token：分数最大的那个；有几个同样大时取 id 最小的。
+ * 有 NaN 时报错返回 -1（NaN 和谁比都是假，不报错的话结果取决于它出现在哪）。 */
+int  logits_argmax(const float *row, size_t vocab, int32_t *out, char *err, size_t errcap);
+
 #endif

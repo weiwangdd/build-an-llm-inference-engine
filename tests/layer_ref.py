@@ -30,8 +30,8 @@ def read_dump(stream):
             r, c = (int(v) for v in shape.strip("[]").split(","))
             cur = (name, r, c, [])
             steps.append(cur)
-        else:
-            cur[3].append(float.fromhex(line))
+        else:                                 # 第 5 章的 greedy 段是十进制的 token id
+            cur[3].append(int(line) if cur[0] == "greedy" else float.fromhex(line))
     return steps
 
 
@@ -177,43 +177,31 @@ def compare(name, got, res, exact=False):
     return None, (worst, loose)
 
 
-def main():
-    _selfcheck()
-    cfg_path, layer, ids, files = sys.argv[1], int(sys.argv[2]), [int(v) for v in sys.argv[3].split(",")], sys.argv[4:]
-    t = json.load(open(cfg_path))["text_config"]
-    W = Tensors(files)
+def layer_plan(step, t, W, layer, n, D, src, pre=""):
+    """把第 layer 层的全部步骤加进计划（第 5 章串起整个模型时也用它）。
+    src 是这一层输入的名字（单层时是 embed，整模时是上一层的 out），pre 是步骤名的前缀。
+    每个计算函数只读 D 里已经检查过的张量。"""
     H, I, eps = t["hidden_size"], t["intermediate_size"], t["rms_norm_eps"]
-    n = len(ids)
     L = P + f"layers.{layer}."
     full = t["layer_types"][layer] == "full_attention"
     vec = lambda name: list(W.floats(name)[1])
+    R = lambda name: D[pre + name]          # 这一层里某一步的结果
 
     def mat(name):
         dt, (rows, cols), buf = W.get(name)
         assert dt == "BF16"
         return buf, rows, cols
 
-    steps = read_dump(sys.stdin)
-    D = {s[0]: s[3] for s in steps}
-
-    # 每一步：(名字, 列数, 计算函数, 是否要求完全相等)。计算函数只读 D 里已经检查过的张量。
-    plan = []
-
-    def step(name, cols, fn, exact=False):
-        plan.append((name, cols, fn, exact))
-
-    def mm(src, wname):
+    def mm(src_, wname):
         buf, rows, cols = mat(wname)
-        return lambda: matmul(D[src], n, buf, rows, cols)
+        return lambda: matmul(D[src_], n, buf, rows, cols)
 
-    def heads_of(src, width, start, length):
+    def heads_of(src_, width, start, length):
         """从每个 token 的 width 维里取出 [start, start+length) 这一段"""
-        x = D[src]
+        x = D[src_]
         return [v for tt in range(n) for v in x[tt * width + start : tt * width + start + length]]
 
-    emb_buf = W.get(P + "embed_tokens.weight")[2]
-    step("embed", H, lambda: [(v, None) for i in ids for v in bf16_row(emb_buf, i, H)], exact=True)
-    step("attn_in", H, lambda: rmsnorm(D["embed"], vec(L + "input_layernorm.weight"), H, eps, True))
+    step(pre + "attn_in", H, lambda: rmsnorm(D[src], vec(L + "input_layernorm.weight"), H, eps, True))
     if full:
         hd, nh, nkv = t["head_dim"], t["num_attention_heads"], t["num_key_value_heads"]
         rp = t["rope_parameters"]
@@ -221,52 +209,76 @@ def main():
         A = L + "self_attn."
         # q_proj 的输出：每个头 2*hd 维，前 hd 维是 q，后 hd 维是门控
         q_part = lambda: [v for tt in range(n) for h in range(nh)
-                          for v in D["q_proj"][(tt * nh + h) * 2 * hd : (tt * nh + h) * 2 * hd + hd]]
+                          for v in R("q_proj")[(tt * nh + h) * 2 * hd : (tt * nh + h) * 2 * hd + hd]]
         g_part = lambda: [v for tt in range(n) for h in range(nh)
-                          for v in D["q_proj"][(tt * nh + h) * 2 * hd + hd : (tt * nh + h + 1) * 2 * hd]]
-        step("q_proj", 2 * nh * hd, mm("attn_in", A + "q_proj.weight"))
-        step("k_proj", nkv * hd, mm("attn_in", A + "k_proj.weight"))
-        step("v_proj", nkv * hd, mm("attn_in", A + "v_proj.weight"))
-        step("q_norm", nh * hd, lambda: rmsnorm(q_part(), vec(A + "q_norm.weight"), hd, eps, True))
-        step("q_rope", nh * hd, lambda: rope(D["q_norm"], n, nh, hd, rot, theta))
-        step("k_norm", nkv * hd, lambda: rmsnorm(D["k_proj"], vec(A + "k_norm.weight"), hd, eps, True))
-        step("k_rope", nkv * hd, lambda: rope(D["k_norm"], n, nkv, hd, rot, theta))
-        step("attn", nh * hd, lambda: attention(D["q_rope"], D["k_rope"], D["v_proj"], n, nh, nkv, hd))
-        step("gate_sigmoid", nh * hd, lambda: [(sigmoid(v), None) for v in g_part()])
-        step("gated", nh * hd, lambda: [(a * b, None) for a, b in zip(D["attn"], D["gate_sigmoid"])])
-        step("attn_out", H, mm("gated", A + "o_proj.weight"))
+                          for v in R("q_proj")[(tt * nh + h) * 2 * hd + hd : (tt * nh + h + 1) * 2 * hd]]
+        step(pre + "q_proj", 2 * nh * hd, mm(pre + "attn_in", A + "q_proj.weight"))
+        step(pre + "k_proj", nkv * hd, mm(pre + "attn_in", A + "k_proj.weight"))
+        step(pre + "v_proj", nkv * hd, mm(pre + "attn_in", A + "v_proj.weight"))
+        step(pre + "q_norm", nh * hd, lambda: rmsnorm(q_part(), vec(A + "q_norm.weight"), hd, eps, True))
+        step(pre + "q_rope", nh * hd, lambda: rope(R("q_norm"), n, nh, hd, rot, theta))
+        step(pre + "k_norm", nkv * hd, lambda: rmsnorm(R("k_proj"), vec(A + "k_norm.weight"), hd, eps, True))
+        step(pre + "k_rope", nkv * hd, lambda: rope(R("k_norm"), n, nkv, hd, rot, theta))
+        step(pre + "attn", nh * hd, lambda: attention(R("q_rope"), R("k_rope"), R("v_proj"), n, nh, nkv, hd))
+        step(pre + "gate_sigmoid", nh * hd, lambda: [(sigmoid(v), None) for v in g_part()])
+        step(pre + "gated", nh * hd, lambda: [(a * b, None) for a, b in zip(R("attn"), R("gate_sigmoid"))])
+        step(pre + "attn_out", H, mm(pre + "gated", A + "o_proj.weight"))
     else:
         hk, hv = t["linear_num_key_heads"], t["linear_num_value_heads"]
         dk, dv, ck = t["linear_key_head_dim"], t["linear_value_head_dim"], t["linear_conv_kernel_dim"]
         kd, vd = hk * dk, hv * dv
         cd = 2 * kd + vd
         A = L + "linear_attn."
-        step("qkv", cd, mm("attn_in", A + "in_proj_qkv.weight"))
-        step("z", vd, mm("attn_in", A + "in_proj_z.weight"))
-        step("b", hv, mm("attn_in", A + "in_proj_b.weight"))
-        step("a", hv, mm("attn_in", A + "in_proj_a.weight"))
-        step("conv", cd, lambda: conv1d(D["qkv"], n, cd, vec(A + "conv1d.weight"), ck))
-        step("conv_silu", cd, lambda: [(silu(v), None) for v in D["conv"]])
+        step(pre + "qkv", cd, mm(pre + "attn_in", A + "in_proj_qkv.weight"))
+        step(pre + "z", vd, mm(pre + "attn_in", A + "in_proj_z.weight"))
+        step(pre + "b", hv, mm(pre + "attn_in", A + "in_proj_b.weight"))
+        step(pre + "a", hv, mm(pre + "attn_in", A + "in_proj_a.weight"))
+        step(pre + "conv", cd, lambda: conv1d(R("qkv"), n, cd, vec(A + "conv1d.weight"), ck))
+        step(pre + "conv_silu", cd, lambda: [(silu(v), None) for v in R("conv")])
         # 卷积的输出依次是 q、k、v 三段
-        step("q_l2", kd, lambda: l2norm(heads_of("conv_silu", cd, 0, kd), dk))
-        step("k_l2", kd, lambda: l2norm(heads_of("conv_silu", cd, kd, kd), dk))
-        step("beta", hv, lambda: [(sigmoid(v), None) for v in D["b"]])
+        step(pre + "q_l2", kd, lambda: l2norm(heads_of(pre + "conv_silu", cd, 0, kd), dk))
+        step(pre + "k_l2", kd, lambda: l2norm(heads_of(pre + "conv_silu", cd, kd, kd), dk))
+        step(pre + "beta", hv, lambda: [(sigmoid(v), None) for v in R("b")])
         A_log, dt_bias = vec(A + "A_log"), vec(A + "dt_bias")
-        step("g", hv, lambda: [(-math.exp(A_log[i % hv]) * softplus(v + dt_bias[i % hv]), None)
-                               for i, v in enumerate(D["a"])])
-        step("delta", vd, lambda: gated_delta(D["q_l2"], D["k_l2"], heads_of("conv_silu", cd, 2 * kd, vd),
-                                              D["g"], D["beta"], n, hk, hv, dk, dv))
-        step("gnorm", vd, lambda: rmsnorm_gated(D["delta"], D["z"], vec(A + "norm.weight"), dv, eps))
-        step("attn_out", H, mm("gnorm", A + "out_proj.weight"))
-    step("resid", H, lambda: [(a + b, None) for a, b in zip(D["embed"], D["attn_out"])])
-    step("mlp_in", H, lambda: rmsnorm(D["resid"], vec(L + "post_attention_layernorm.weight"), H, eps, True))
-    step("gate", I, mm("mlp_in", L + "mlp.gate_proj.weight"))
-    step("up", I, mm("mlp_in", L + "mlp.up_proj.weight"))
-    step("gate_silu", I, lambda: [(silu(v), None) for v in D["gate"]])
-    step("act", I, lambda: [(a * b, None) for a, b in zip(D["gate_silu"], D["up"])])
-    step("mlp_out", H, mm("act", L + "mlp.down_proj.weight"))
-    step("out", H, lambda: [(a + b, None) for a, b in zip(D["resid"], D["mlp_out"])])
-    step("final_norm", H, lambda: rmsnorm(D["out"], vec(P + "norm.weight"), H, eps, True))
+        step(pre + "g", hv, lambda: [(-math.exp(A_log[i % hv]) * softplus(v + dt_bias[i % hv]), None)
+                                     for i, v in enumerate(R("a"))])
+        step(pre + "delta", vd, lambda: gated_delta(R("q_l2"), R("k_l2"), heads_of(pre + "conv_silu", cd, 2 * kd, vd),
+                                                    R("g"), R("beta"), n, hk, hv, dk, dv))
+        step(pre + "gnorm", vd, lambda: rmsnorm_gated(R("delta"), R("z"), vec(A + "norm.weight"), dv, eps))
+        step(pre + "attn_out", H, mm(pre + "gnorm", A + "out_proj.weight"))
+    step(pre + "resid", H, lambda: [(a + b, None) for a, b in zip(D[src], R("attn_out"))])
+    step(pre + "mlp_in", H, lambda: rmsnorm(R("resid"), vec(L + "post_attention_layernorm.weight"), H, eps, True))
+    step(pre + "gate", I, mm(pre + "mlp_in", L + "mlp.gate_proj.weight"))
+    step(pre + "up", I, mm(pre + "mlp_in", L + "mlp.up_proj.weight"))
+    step(pre + "gate_silu", I, lambda: [(silu(v), None) for v in R("gate")])
+    step(pre + "act", I, lambda: [(a * b, None) for a, b in zip(R("gate_silu"), R("up"))])
+    step(pre + "mlp_out", H, mm(pre + "act", L + "mlp.down_proj.weight"))
+    step(pre + "out", H, lambda: [(a + b, None) for a, b in zip(R("resid"), R("mlp_out"))])
+
+
+def main():
+    _selfcheck()
+    cfg_path, layer, ids, files = sys.argv[1], int(sys.argv[2]), [int(v) for v in sys.argv[3].split(",")], sys.argv[4:]
+    t = json.load(open(cfg_path))["text_config"]
+    W = Tensors(files)
+    H = t["hidden_size"]
+    n = len(ids)
+    full = t["layer_types"][layer] == "full_attention"
+    vec = lambda name: list(W.floats(name)[1])
+
+    steps = read_dump(sys.stdin)
+    D = {s[0]: s[3] for s in steps}
+
+    # 每一步：(名字, 列数, 计算函数, 是否要求完全相等)
+    plan = []
+
+    def step(name, cols, fn, exact=False):
+        plan.append((name, cols, fn, exact))
+
+    emb_buf = W.get(P + "embed_tokens.weight")[2]
+    step("embed", H, lambda: [(v, None) for i in ids for v in bf16_row(emb_buf, i, H)], exact=True)
+    layer_plan(step, t, W, layer, n, D, "embed")
+    step("final_norm", H, lambda: rmsnorm(D["out"], vec(P + "norm.weight"), H, t["rms_norm_eps"], True))
 
     want = [(s[0], n, s[1]) for s in plan]
     got = [(s[0], s[1], s[2]) for s in steps]
