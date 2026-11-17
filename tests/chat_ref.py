@@ -3,9 +3,10 @@
 
 用法：chat_ref.py tokenizer.json chat_template.jinja requests.jsonl
 每行请求是一个 JSON 对象（字段见 src/chat.h）。输出“渲染结果的十六进制 id 序列”，
-模板报错时输出 error。
+模板报错时输出 error。需要 transformers 和 jinja2（transformers 不会自动装上 jinja2）。
 """
 import json, sys
+import jinja2  # 缺了它，每个请求都会抛 ImportError，不能被当成“模板报错”吞掉
 from tokenizers import Tokenizer
 from transformers import PreTrainedTokenizerFast
 
@@ -23,7 +24,10 @@ def main(tok_path, tpl_path, req_path):
             tools = req.pop("tools", None)
             try:
                 text = hf.apply_chat_template(messages, tools=tools, chat_template=template, tokenize=False, **req)
-            except Exception:
+            # 只有这三类算“按模板应当报错”：模板里的 raise_exception（TemplateError）、
+            # 模板运行时的类型错误（如对字符串用 items），以及 transformers 拒绝空对话（ValueError）。
+            # 其他异常（缺库、参考实现自身的 bug）直接抛出，让测试失败。
+            except (jinja2.TemplateError, TypeError, ValueError):
                 out.write("error\n")
                 continue
             ids = tk.encode(text).ids

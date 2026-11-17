@@ -44,10 +44,10 @@ check "编码" encode "$FX/texts.jsonl"
 check "解码" decode "$FX/ids.txt"
 check "编码再解码" roundtrip "$FX/roundtrip.jsonl"
 
-# 对话模板：参考实现是 transformers，没装就明确跳过（不算通过）
+# 对话模板：参考实现是 transformers（还要 jinja2），没装就明确跳过（不算通过）
 TPL=tests/data/qwen38-27b-chat_template.jinja
 if [ "${2:-}" = real ] && [ -f "$(dirname "$3")/chat_template.jinja" ]; then TPL=$(dirname "$3")/chat_template.jinja; fi
-if $PY -c "import transformers" 2>/dev/null; then
+if $PY -c "import transformers, jinja2" 2>/dev/null; then
     $PY tests/chat_ref.py "$FX/tokenizer.json" "$TPL" "$FX/chat.jsonl" > "$B/ref.txt" 2>/dev/null || { echo "FAIL 参考实现出错 对话模板"; fail=1; }
     "$B/tok" chat "$FX/tokenizer.json" "$TPL" "$FX/chat.jsonl" > "$B/got.txt"; rc=$?
     if [ $rc -eq 0 ] && cmp -s "$B/ref.txt" "$B/got.txt"; then
@@ -57,7 +57,7 @@ if $PY -c "import transformers" 2>/dev/null; then
     msg=$("$B/tok" chat "$FX/tokenizer.json" "$B/bad_template.jinja" "$FX/chat.jsonl" 2>&1 >/dev/null); rc=$?
     if [ $rc -eq 1 ]; then echo "ok   改动过的模板：$msg"; else echo "FAIL 改动过的模板应被拒绝，实际 rc=$rc"; fail=1; fi
 else
-    echo "SKIP 对话模板：需要 transformers 库（pip install transformers）"
+    echo "SKIP 对话模板：需要 transformers 和 jinja2 库（pip install transformers jinja2）"
 fi
 
 if [ "${2:-}" = real ]; then
