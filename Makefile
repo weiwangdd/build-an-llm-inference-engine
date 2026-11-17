@@ -6,7 +6,7 @@ PYTHON  ?= python3
 
 TOK_SRC = src/tok.c src/json.c src/unicode.c src/unicode_tables.c src/chat.c src/sha256.c
 
-all: $(BUILD)/st_dump $(BUILD)/tok
+all: $(BUILD)/st_dump $(BUILD)/tok $(BUILD)/ops
 
 $(BUILD)/st_dump: tools/st_dump.c src/st.c src/st.h
 	@mkdir -p $(BUILD)
@@ -16,10 +16,20 @@ $(BUILD)/tok: tools/tok.c $(TOK_SRC) src/tok.h src/json.h src/unicode.h src/unic
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(SAN) -o $@ tools/tok.c $(TOK_SRC)
 
-# 第 1 章和第 2 章的快速测试
-test: $(BUILD)/st_dump $(BUILD)/tok
+$(BUILD)/ops: tools/ops.c src/ops.c src/ops.h src/st.c src/st.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(SAN) -o $@ tools/ops.c src/ops.c src/st.c -lm
+
+# 第 1、2、3 章的快速测试
+test: $(BUILD)/st_dump $(BUILD)/tok $(BUILD)/ops
 	sh tests/run.sh $(BUILD)
 	sh tests/run_tok.sh $(BUILD)
+	PYTHON=$(PYTHON) sh tests/run_ops.sh $(BUILD)
+
+# 第 3 章：拿真实模型的权重当算子输入，例如
+#   make test-ops-real MODEL=/data/models/Qwen3.8-27B
+test-ops-real: $(BUILD)/ops
+	PYTHON=$(PYTHON) sh tests/run_ops.sh $(BUILD) real $(MODEL)
 
 # 第 2 章：全部 Unicode 码点的穷举对拍，几分钟
 test-unicode: $(BUILD)/tok
@@ -42,4 +52,4 @@ unicode-tables: tools/gen_unicode.c
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all test test-unicode test-real unicode-tables clean
+.PHONY: all test test-unicode test-real test-ops-real unicode-tables clean

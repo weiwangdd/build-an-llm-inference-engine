@@ -15,10 +15,11 @@
 | [前言](book/00-preface.md) | 目标、原则、路线 | 初稿 |
 | [第 1 章](book/01-weights.md) | 读取权重文件（safetensors） | 初稿，已在 Qwen3-4B 和 Qwen3.8-27B 的全部权重上对拍 |
 | [第 2 章](book/02-tokenizer.md) | 分词器（BPE、NFC、预分词、对话模板） | 初稿，已在小词表、全部 Unicode 码点和 Qwen3.8-27B 真实词表上对拍；对话模板与 transformers 对拍 |
+| [第 3 章](book/03-ops.md) | 张量与算子（矩阵乘、两种 RMSNorm、激活、softmax、RoPE、因果卷积） | 初稿，已在小输入上逐元素对拍（误差不超过 1 ulp）；真实权重上的验收待做 |
 
 ## 构建与测试
 
-需要一个 C17 编译器、make 和 Python 3。第 1 章的测试只用 Python 标准库；第 2 章的测试要和官方分词器对拍，需要 Hugging Face 的 `tokenizers` 库（在 0.21.4 到 0.23.3 上验证过，更早的版本预分词会有差异）。建议装在虚拟环境里，再用 `PYTHON` 指定它：
+需要一个 C17 编译器、make 和 Python 3。第 1 章和第 3 章的测试只用 Python 标准库；第 2 章的测试要和官方分词器对拍，需要 Hugging Face 的 `tokenizers` 库（在 0.21.4 到 0.23.3 上验证过，更早的版本预分词会有差异）。建议装在虚拟环境里，再用 `PYTHON` 指定它：
 
 ```
 python3 -m venv ~/venvs/tok      # 或者 uv venv ~/venvs/tok
@@ -31,6 +32,7 @@ transformers 只用于对话模板的对拍；没装时这一项会打印“跳�
 make test PYTHON=$HOME/venvs/tok/bin/python            # 快速测试，几秒钟
 make test-unicode PYTHON=$HOME/venvs/tok/bin/python    # 第 2 章：全部 Unicode 码点的穷举对拍，几分钟
 make test-real TOKENIZER=<模型目录>/tokenizer.json PYTHON=$HOME/venvs/tok/bin/python   # 第 2 章：在真实词表上对拍
+make test-ops-real MODEL=<模型目录>                     # 第 3 章：拿真实权重当算子输入，约一分钟
 ```
 
 如果系统的 `python3` 已经装了 `tokenizers`，可以省略 `PYTHON=`。
