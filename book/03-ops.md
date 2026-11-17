@@ -16,9 +16,165 @@
 
 这个标准比通常的“相对误差小于 1e-3”严得多。后面“误差要多小才算对”一节解释它从哪里来、为什么定这么严。
 
+## 读懂 config.json
+
+做哪些算子，不能凭印象。我们手里有三份互相印证的材料：
+
+1. 模型目录里的 `config.json`：模型的“规格书”，写着层数、维度、头数这些数。
+2. transformers 库里对应的建模代码：写着这些数怎么用，也就是计算的公式。
+3. 权重文件里的张量名和形状（第 1 章读出来的）：最终的事实。代码里有一个线性层，权重里就一定有一个形状对得上的矩阵。
+
+三者有一处对不上，就说明我们读错了某个地方。这一节先读第一份。
+
+### 文件的整体结构
+
+Qwen3.8-27B 的 `config.json` 有 4312 字节（SHA-256 `191e0af2…7203aab`），去掉 64 行的 `layer_types` 之后，骨架是这样的：
+
+```json
+{
+    "architectures": ["Qwen3_5ForConditionalGeneration"],
+    "model_type": "qwen3_5",
+    "transformers_version": "5.8.0.dev0",
+    "language_model_only": false,
+    "tie_word_embeddings": false,
+    "image_token_id": 248056,
+    "video_token_id": 248057,
+    "vision_start_token_id": 248053,
+    "vision_end_token_id": 248054,
+    "text_config":   { … 语言模型 … },
+    "vision_config": { … 图像编码器 … }
+}
+```
+
+最外层的几个字段决定“去哪里找代码”：
+
+- **`model_type`** 是 `qwen3_5`。transformers 按这个名字找到 `models/qwen3_5/` 目录，里面的 `configuration_qwen3_5.py` 定义每个字段的默认值和含义，`modeling_qwen3_5.py` 定义计算。这个名字说明 Qwen3.8 沿用的是 Qwen3.5 的架构代码。
+- **`architectures`** 是 `Qwen3_5ForConditionalGeneration`，即“图像加文字”的多模态模型。所以配置分成 `text_config` 和 `vision_config` 两半，这和第 1 章看到的张量名前缀一致：`model.language_model.` 是语言模型，`model.visual.` 是图像编码器。
+- **`transformers_version`** 是保存这份配置的 transformers 版本。我们读的建模代码是 5.23.0 版，比它新。同一个字段在不同版本里的用法可能不同（第 2 章就遇到过参考库随版本变化的例子），所以下面凡是说“代码怎么用这个字段”，指的都是 5.23.0 版，以后对拍时要用和模型配套的版本再核对。
+- 四个 `*_token_id` 是图像、视频的占位 token，也就是第 2 章对话模板里的 `<|image_pad|>`、`<|vision_start|>` 等。纯文本推理用不到。
+
+第一卷只做文字，所以 `vision_config` 整个跳过：它描述的是一个 27 层、宽 1152 的图像编码器，`out_hidden_size` 是 5120，意思是它的输出最终要变成和文字 token 一样宽的向量，混进语言模型里。
+
+### text_config：语言模型
+
+下面是 `text_config` 的全部字段，按用途分组。“代码”一列指 5.23.0 版 `modeling_qwen3_5.py` 里用到它的地方。
+
+**整体规模**
+
+| 字段 | 值 | 含义 |
+| --- | --- | --- |
+| `vocab_size` | 248320 | 嵌入表和输出层的行数。真正的 token 只有 248077 个，多出的 243 行是填充（第 2 章） |
+| `hidden_size` | 5120 | 残差流的宽度：每个 token 在层与层之间传递的向量长度 |
+| `num_hidden_layers` | 64 | 层数 |
+| `intermediate_size` | 17408 | 前馈层中间的宽度，约为 `hidden_size` 的 3.4 倍 |
+| `hidden_act` | `silu` | 前馈层和线性注意力卷积后的激活函数 |
+| `rms_norm_eps` | 1e-06 | 所有 RMSNorm 的 eps（L2 归一化的 eps 不用它，在代码里写死为 1e-6） |
+| `tie_word_embeddings` | false | 输出层不复用嵌入表。所以权重里有单独的 `lm_head.weight`，形状和嵌入表一样是 [248320, 5120] |
+| `dtype` | `bfloat16` | 权重的类型。第 1 章已确认 27B 的 1199 个张量全是 BF16 |
+
+**层的排布**
+
+| 字段 | 值 | 含义 |
+| --- | --- | --- |
+| `layer_types` | 64 项 | 每一层用哪种注意力：`linear_attention` 或 `full_attention`，按“3 个线性、1 个全注意力”重复 16 次 |
+| `full_attention_interval` | 4 | 同一件事的另一种写法：每 4 层一个全注意力。代码只在没给 `layer_types` 时才用它来生成那 64 项 |
+
+两个字段说的是同一件事，以 `layer_types` 为准。我们的代码读 `layer_types`，不自己按间隔推算。这样即使以后某个模型的排布不规则，也不会算错。
+
+**全注意力层**（16 层）
+
+| 字段 | 值 | 含义 |
+| --- | --- | --- |
+| `num_attention_heads` | 24 | 查询头数 |
+| `num_key_value_heads` | 4 | 键值头数。每 6 个查询头共用一组键值（分组查询注意力，GQA） |
+| `head_dim` | 256 | 每个头的维度 |
+| `attention_bias` | false | q、k、v、o 四个投影都没有偏置项，权重里也就没有 `*.bias` |
+| `attn_output_gate` | true | 注意力的输出要乘一个门控 |
+| `attention_dropout` | 0.0 | 只在训练时有用 |
+
+`head_dim` 值得多看一眼：24 × 256 = 6144，不等于 `hidden_size` 的 5120。很多模型的头维度是 `hidden_size / num_attention_heads` 算出来的，这里是单独给定的，所以 q 投影把 5120 维映射到更宽的 6144 维，o 投影再映射回 5120。如果凭“头维度 = 宽度 / 头数”的印象来写，会得到 5120 / 24 ≈ 213.3，根本不是整数。第 1 章的权重形状也能印证这一点：q_proj 是 [12288, 5120]，k_proj 是 [1024, 5120]。12288 = 24 × 256 × 2，多出来的那个 2 就是门控：每个头除了 256 维的 q，还要产出 256 维的门控。1024 = 4 × 256。
+
+`attn_output_gate` 是个有意思的字段。5.23.0 版的代码里没有任何地方读它：门控是无条件写在 `Qwen3_5Attention` 里的。也就是说，把它改成 false，transformers 照样会乘门控。配置里的字段并不全是“开关”，有的只是记录。判断一个字段到底起不起作用，只能去读代码。
+
+**线性注意力层**（48 层）
+
+| 字段 | 值 | 含义 |
+| --- | --- | --- |
+| `linear_num_key_heads` | 16 | 线性注意力 q、k 的头数 |
+| `linear_num_value_heads` | 48 | v 的头数。每个 q/k 头服务 3 个 v 头 |
+| `linear_key_head_dim` | 128 | q、k 每个头的维度 |
+| `linear_value_head_dim` | 128 | v 每个头的维度 |
+| `linear_conv_kernel_dim` | 4 | 因果卷积的长度 |
+| `output_gate_type` | `swish` | 输出门控用的激活函数，swish 就是 silu |
+| `mamba_ssm_dtype` | `float32` | 状态矩阵用什么精度保存 |
+
+这几个数同样能和权重形状对上：`in_proj_qkv` 是 [10240, 5120]，10240 = 16 × 128（q）+ 16 × 128（k）+ 48 × 128（v）；卷积核是 [10240, 1, 4]，每个通道一个长度为 4 的核。注意 transformers 里这个字段的默认值是 32，而 27B 是 48，同系列不同尺寸的模型并不一样，所以必须读文件，不能用默认值。
+
+`output_gate_type` 和 `mamba_ssm_dtype` 在 5.23.0 版的 `qwen3_5` 代码里也没人读。前者与代码里写死的 silu 一致。后者说的是线性注意力的状态矩阵要用 float32 保存，而代码在计算 delta 规则时本来就把所有输入转成了 float32。这一项第 4 章还要再看。`mamba` 这个名字来自另一类同样带“状态”的模型，大约是训练代码沿用的名字。
+
+**位置编码**
+
+| 字段 | 值 | 含义 |
+| --- | --- | --- |
+| `max_position_embeddings` | 262144 | 支持的最长上下文，2¹⁸ 个 token |
+| `rope_parameters.rope_type` | `default` | 标准的 RoPE，不做长度外推之类的缩放 |
+| `rope_parameters.rope_theta` | 10000000 | 频率的底数 θ |
+| `rope_parameters.partial_rotary_factor` | 0.25 | 只转每个头的前 25%，即 256 × 0.25 = 64 维 |
+| `rope_parameters.mrope_section` | [11, 11, 10] | 64 维分成 32 对，按时间、高、宽三个分量分配 |
+| `rope_parameters.mrope_interleaved` | true | 三个分量交错分配，而不是分成连续的三段 |
+| `partial_rotary_factor`（`text_config` 顶层） | 0.25 | 与上面那个重复，旧版本留下的写法 |
+
+`partial_rotary_factor` 出现了两次，值相同。代码读的是 `rope_parameters` 里的那个。重复的字段是隐患：哪天两边不一致，就要靠读代码才知道哪个算数。我们的测试脚本只读 `rope_parameters` 里的那个，和代码一致。
+
+mrope 的两个字段在纯文本时不起作用，原因见后面 RoPE 一节。
+
+**多 token 预测**
+
+| 字段 | 值 | 含义 |
+| --- | --- | --- |
+| `mtp_num_hidden_layers` | 1 | 额外的一层“多 token 预测”模块 |
+| `mtp_use_dedicated_embeddings` | false | 这个模块不用单独的嵌入表 |
+
+这是第 1 章看到的 15 个 `mtp.` 开头的张量。它训练时用来让模型一次预测好几个 token，推理时可以用来做“投机解码”加速。transformers 5.23.0 加载权重时明确忽略所有 `mtp.` 开头的张量（`_keys_to_ignore_on_load_unexpected`），普通的逐 token 生成也用不到它，第一卷跳过。
+
+**特殊 token 和其他**
+
+| 字段 | 值 | 含义 |
+| --- | --- | --- |
+| `bos_token_id` | 248044 | `<|endoftext|>` |
+| `eos_token_id` | 248044 | `<|endoftext|>` |
+| `pad_token_id` | null | 没有指定 |
+| `use_cache` | true | 生成时默认使用缓存（第 6 章） |
+| `initializer_range` | 0.02 | 训练前随机初始化的标准差，推理用不到 |
+
+`eos_token_id` 是 248044，但对话时模型说完一句话输出的是 `<|im_end|>`（248046）。真正决定“什么时候停”的是另一个文件。
+
+### generation_config.json
+
+模型目录里还有一个 202 字节的 `generation_config.json`（SHA-256 `e70c136c…c70be550e`），它不描述模型的结构，而是描述“官方建议怎么生成”：
+
+```json
+{
+    "bos_token_id": 248044,
+    "do_sample": true,
+    "eos_token_id": [248046, 248044],
+    "pad_token_id": 248044,
+    "temperature": 1.0,
+    "top_k": 20,
+    "top_p": 0.95
+}
+```
+
+- `eos_token_id` 是两个：`<|im_end|>` 和 `<|endoftext|>`，输出其中任何一个都算结束。第 6 章的停止条件以这里为准，而不是 `config.json` 里的那一个。
+- `do_sample`、`temperature`、`top_k`、`top_p` 是默认的采样参数：随机采样，只在概率最高的 20 个 token 里选，并且只保留累计概率前 95% 的那些。第 6 章实现采样时会用到。第 5 章做整模对拍时我们用贪心解码（每次取概率最高的），不用这些参数，因为随机采样没法逐 token 对拍。
+
+### 从配置到算子
+
+把上面的字段和建模代码对照起来，就得到了这一章要实现的算子和它们的维度。下一节把它们整理成一张清单。第 4 章加载模型时，我们的代码会从 `config.json` 读这些数，而不是写死；读到不认识的取值，比如 `rope_type` 不是 `default`、`hidden_act` 不是 `silu`，就报错，这和第 2 章只接受 Qwen 那一种分词器配置是同一个原则。这一章的真实权重测试已经在这样做：eps、θ、旋转维数、层的类型都从文件里读。
+
 ## 先看模型由哪些算子组成
 
-做哪些算子，不能凭印象。Qwen3.8-27B 的 `config.json` 里 `model_type` 是 `qwen3_5`，官方的计算方式写在 transformers 库的 `models/qwen3_5/modeling_qwen3_5.py` 里（我们读的是 5.23.0 版）。这一节的结构和公式都来自这份代码，数字来自模型的 `config.json` 和第 1 章读出的权重形状。
+这一节的结构和公式来自 transformers 5.23.0 版的 `models/qwen3_5/modeling_qwen3_5.py`，数字来自上一节的 `config.json` 和第 1 章读出的权重形状。
 
 整个模型是 64 层，每层的骨架相同：
 
