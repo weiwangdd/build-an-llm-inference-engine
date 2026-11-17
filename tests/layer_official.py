@@ -59,6 +59,7 @@ def run(tc, layer, ids, W, dtype):
     norm = M.Qwen3_5RMSNorm(tc.hidden_size, eps=tc.rms_norm_eps)
     norm.load_state_dict({"weight": W[P + "norm.weight"]}, strict=True)
     rot = M.Qwen3_5TextRotaryEmbedding(tc)
+    full = tc.layer_types[layer] == "full_attention"   # 层的属性名随版本变（5.23.0 叫 block_type，5.8 叫 layer_type），直接读配置
     dec.to(dtype); norm.to(dtype)
 
     got = {}
@@ -71,7 +72,7 @@ def run(tc, layer, ids, W, dtype):
 
     hooks = {"input_layernorm": "attn_in", "post_attention_layernorm": "mlp_in", "mlp": "mlp_out",
              "mlp.gate_proj": "gate", "mlp.up_proj": "up"}
-    if dec.block_type == "full_attention":
+    if full:
         hooks.update({"self_attn": "attn_out", "self_attn.q_proj": "q_proj", "self_attn.k_proj": "k_proj",
                       "self_attn.v_proj": "v_proj", "self_attn.q_norm": "q_norm", "self_attn.k_norm": "k_norm"})
     else:
@@ -86,7 +87,7 @@ def run(tc, layer, ids, W, dtype):
         pos = torch.arange(n).unsqueeze(0)
         cos_sin = rot(h, pos)
         mask = None
-        if dec.block_type == "full_attention":
+        if full:
             # eager 注意力用加法掩码：未来位置加 -inf
             mask = torch.full((n, n), -math.inf, dtype=dtype).triu(1)[None, None]
         out = dec(h, position_embeddings=cos_sin, attention_mask=mask, position_ids=pos)

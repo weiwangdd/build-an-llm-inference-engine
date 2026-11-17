@@ -20,8 +20,8 @@ run_cases() {  # run_cases <config.json> <用例清单> <分片 ...>
         if msg=$($PY tests/layer_ref.py "$cfg" "$layer" "$ids" "$@" < "$B/got.txt"); then echo "ok   $name 逐步：$msg"
         else echo "FAIL $name 逐步：$msg"; fail=1; fi
         [ $official = 1 ] || continue
-        if msg=$($PY tests/layer_official.py "$cfg" "$layer" "$ids" "$@" < "$B/got.txt" 2>/dev/null); then echo "ok   $name 官方：$msg"
-        else echo "FAIL $name 官方：$msg"; fail=1; fi
+        if msg=$($PY tests/layer_official.py "$cfg" "$layer" "$ids" "$@" < "$B/got.txt" 2>"$B/official_err.txt"); then echo "ok   $name 官方：$msg"
+        else echo "FAIL $name 官方：$msg $(tail -1 "$B/official_err.txt")"; fail=1; fi
     done < "$list"
 }
 
