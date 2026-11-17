@@ -68,4 +68,33 @@ void op_rope(float *y, const float *x, const int32_t *pos, size_t n, size_t head
  * 即 w[j][k-1] 乘当前 token，w[j][0] 乘往前数第 k-1 个 token。 */
 void op_conv1d(float *y, const float *x, const float *w, size_t n, size_t c, size_t k);
 
+/* ---------- 第 4 章加的算子 ---------- */
+
+/* 逐元素加法、乘法：y[i] = a[i] + b[i]，y[i] = a[i] * b[i]。float 的一次加法、乘法本来就是正确舍入。
+ * 例外：这两个算子的 y 可以就是 a（就地更新），残差连接就是这样用的。 */
+void op_add(float *y, const float *a, const float *b, size_t n);
+void op_mul(float *y, const float *a, const float *b, size_t n);
+
+/* 线性注意力的衰减量（对数形式）：a 是 [n, heads]，A_log、dt_bias 是 [heads]，
+ *   g[t][h] = -e^(A_log[h]) * softplus(a[t][h] + dt_bias[h])
+ * 状态矩阵每一步乘 e^g，g <= 0，所以 e^g 在 0 和 1 之间。 */
+void op_decay(float *g, const float *a, const float *A_log, const float *dt_bias, size_t n, size_t heads);
+
+/* 因果的分组查询注意力。q、y 是 [n, heads, d]，k、v 是 [n, kv, d]，第 h 个查询头用第 h / (heads / kv) 组键值。
+ *   p[t][s] = softmax_s( scale * q[t]·k[s] )，s 只取 0 .. t（因果）
+ *   y[t]    = Σ_s p[t][s] v[s]
+ * 内部用 double。成功返回 0，内存不足返回 -1。 */
+int  op_attention(float *y, const float *q, const float *k, const float *v,
+                  size_t n, size_t heads, size_t kv, size_t d, double scale, char *err, size_t errcap);
+
+/* 门控 delta 规则（线性注意力的核心）。q、k 是 [n, hk, dk]，v、y 是 [n, hv, dv]，g、beta 是 [n, hv]。
+ * 第 j 个值头用第 j / (hv / hk) 个键头。每个值头维护一个 dk × dv 的状态矩阵 S，初值为 0，逐 token 更新：
+ *   S    = e^(g[t]) · S                  衰减：旧的记忆按比例淡去
+ *   u    = beta[t] · (v[t] − Sᵀ k[t])    Sᵀk 是状态对 v 的“预测”，u 是按 beta 缩放的预测误差
+ *   S    = S + k[t] uᵀ                   把误差写回状态
+ *   y[t] = Sᵀ q[t] / √dk
+ * 状态全程用 double 保存。成功返回 0，内存不足返回 -1。 */
+int  op_gated_delta(float *y, const float *q, const float *k, const float *v, const float *g, const float *beta,
+                    size_t n, size_t hk, size_t hv, size_t dk, size_t dv, char *err, size_t errcap);
+
 #endif

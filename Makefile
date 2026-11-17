@@ -6,7 +6,7 @@ PYTHON  ?= python3
 
 TOK_SRC = src/tok.c src/json.c src/unicode.c src/unicode_tables.c src/chat.c src/sha256.c
 
-all: $(BUILD)/st_dump $(BUILD)/tok $(BUILD)/ops
+all: $(BUILD)/st_dump $(BUILD)/tok $(BUILD)/ops $(BUILD)/layer
 
 $(BUILD)/st_dump: tools/st_dump.c src/st.c src/st.h
 	@mkdir -p $(BUILD)
@@ -20,16 +20,27 @@ $(BUILD)/ops: tools/ops.c src/ops.c src/ops.h src/st.c src/st.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(SAN) -o $@ tools/ops.c src/ops.c src/st.c -lm
 
-# 第 1、2、3 章的快速测试
-test: $(BUILD)/st_dump $(BUILD)/tok $(BUILD)/ops
+$(BUILD)/layer: tools/layer.c src/model.c src/model.h src/ops.c src/ops.h src/st.c src/st.h src/json.c src/json.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(SAN) -o $@ tools/layer.c src/model.c src/ops.c src/st.c src/json.c -lm
+
+# 第 1 到 4 章的快速测试
+test: $(BUILD)/st_dump $(BUILD)/tok $(BUILD)/ops $(BUILD)/layer
 	sh tests/run.sh $(BUILD)
 	sh tests/run_tok.sh $(BUILD)
 	PYTHON=$(PYTHON) sh tests/run_ops.sh $(BUILD)
+	PYTHON=$(PYTHON) sh tests/run_layer.sh $(BUILD)
 
 # 第 3 章：拿真实模型的权重当算子输入，例如
 #   make test-ops-real MODEL=/data/models/Qwen3.8-27B
 test-ops-real: $(BUILD)/ops
 	PYTHON=$(PYTHON) sh tests/run_ops.sh $(BUILD) real $(MODEL)
+
+# 第 4 章：在真实模型上做单层对拍，例如
+#   make test-layer-real MODEL=/data/models/Qwen3.8-27B PYTHON=$HOME/venvs/x/bin/python
+# 第二层对拍需要 PYTHON 里装了 torch 和 transformers，没装就只做第一层。
+test-layer-real: $(BUILD)/layer $(BUILD)/tok
+	PYTHON=$(PYTHON) sh tests/run_layer.sh $(BUILD) real $(MODEL)
 
 # 第 2 章：全部 Unicode 码点的穷举对拍，几分钟
 test-unicode: $(BUILD)/tok
@@ -52,4 +63,4 @@ unicode-tables: tools/gen_unicode.c
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all test test-unicode test-real test-ops-real unicode-tables clean
+.PHONY: all test test-unicode test-real test-ops-real test-layer-real unicode-tables clean

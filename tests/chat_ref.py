@@ -22,10 +22,15 @@ def main(tok_path, tpl_path, req_path):
             req = json.loads(line)
             messages = req.pop("messages")
             tools = req.pop("tools", None)
+            # transformers 拒绝空对话，但各版本报的异常不同：5.23.0 是 ValueError，
+            # 5.8.0.dev0 还没进模板就在 conversation[0] 上抛 IndexError。这里直接按“应当报错”处理。
+            if not messages:
+                out.write("error\n")
+                continue
             try:
                 text = hf.apply_chat_template(messages, tools=tools, chat_template=template, tokenize=False, **req)
             # 只有这三类算“按模板应当报错”：模板里的 raise_exception（TemplateError）、
-            # 模板运行时的类型错误（如对字符串用 items），以及 transformers 拒绝空对话（ValueError）。
+            # 模板运行时的类型错误（如对字符串用 items），以及 transformers 拒绝的其他输入（ValueError）。
             # 其他异常（缺库、参考实现自身的 bug）直接抛出，让测试失败。
             except (jinja2.TemplateError, TypeError, ValueError):
                 out.write("error\n")
