@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 命令
 
-需要 C17 编译器、make、Python 3。第 2 章的测试需要 `tokenizers` 库（验证过 0.21.4–0.23.3），对话模板的对拍还需要 `transformers`（没装时打印 SKIP）。系统 Python 通常没有它，装在虚拟环境里，用 `PYTHON=$HOME/venvs/.../bin/python` 传给所有 `make test*` 目标（`tests/run_tok.sh` 读这个环境变量；第 1 章的 `tests/run.sh` 固定用 `python3`，只需标准库）。在 zsh 里不要写 `PYTHON=~/...`，`~` 不会展开。
+需要 C17 编译器、make、Python 3。第 2 章的测试需要 `tokenizers` 库（验证过 0.21.4–0.23.3），对话模板的对拍还需要 `transformers` 和 `jinja2`（前者不会自动带上后者；没装时打印 SKIP）。系统 Python 通常没有它，装在虚拟环境里，用 `PYTHON=$HOME/venvs/.../bin/python` 传给所有 `make test*` 目标（`tests/run_tok.sh` 读这个环境变量；第 1 章的 `tests/run.sh` 固定用 `python3`，只需标准库）。在 zsh 里不要写 `PYTHON=~/...`，`~` 不会展开。
 
 ```
 make                 # 构建 build/st_dump 和 build/tok

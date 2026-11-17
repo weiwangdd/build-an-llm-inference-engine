@@ -22,10 +22,10 @@
 
 ```
 python3 -m venv ~/venvs/tok      # 或者 uv venv ~/venvs/tok
-~/venvs/tok/bin/pip install "tokenizers>=0.21.4,<=0.23.3" transformers
+~/venvs/tok/bin/pip install "tokenizers>=0.21.4,<=0.23.3" transformers jinja2
 ```
 
-transformers 只用于对话模板的对拍；没装时这一项会打印“跳过”，其余测试照常运行。
+transformers 和 jinja2 只用于对话模板的对拍（transformers 不会自动装上 jinja2）；没装时这一项会打印“跳过”，其余测试照常运行。
 
 ```
 make test PYTHON=$HOME/venvs/tok/bin/python            # 快速测试，几秒钟

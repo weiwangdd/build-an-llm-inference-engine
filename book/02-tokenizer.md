@@ -262,7 +262,7 @@ Qwen3.8-27B 的模板有 174 行、9004 字节。我们没有用 C 写一个 Jin
 
 测试请求由 `make_tok_fixtures.py` 生成：19 个手写的典型对话（普通对话、关闭思考、三种思考强度、工具调用、图片和视频、各种会让模板报错的情况），加上 3000 个随机拼出来的对话。随机对话会随机地带上系统消息、工具定义、思考内容、工具调用、图片、各种空白和特殊字符，工具调用的参数里有大整数、各种量级的浮点数和嵌套结构。3019 个请求里有 242 个按模板应当报错，其余 2777 个的渲染结果逐字节一致。我们还另外用 3 万个随机对话跑过一次，也全部一致。在目标机器上，用和模型配套的 transformers 5.8.0.dev0 和模型目录里的模板文件本身再跑一遍，结果相同。
 
-模板的测试文件 [`tests/data/qwen38-27b-chat_template.jinja`](../tests/data/qwen38-27b-chat_template.jinja) 是官方文件的原样副本（Apache 2.0），这样 `make test` 不需要模型目录也能跑。这一项需要 transformers 库，没装时测试会明确打印“跳过”。
+模板的测试文件 [`tests/data/qwen38-27b-chat_template.jinja`](../tests/data/qwen38-27b-chat_template.jinja) 是官方文件的原样副本（Apache 2.0），这样 `make test` 不需要模型目录也能跑。这一项需要 transformers 和 jinja2 两个库（transformers 不会自动装上 jinja2），没装时测试会明确打印“跳过”。
 
 ## 不信任输入
 
