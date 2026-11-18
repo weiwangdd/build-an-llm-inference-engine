@@ -97,4 +97,25 @@ int  op_attention(float *y, const float *q, const float *k, const float *v,
 int  op_gated_delta(float *y, const float *q, const float *k, const float *v, const float *g, const float *beta,
                     size_t n, size_t hk, size_t hv, size_t dk, size_t dv, char *err, size_t errcap);
 
+/* ---------- 第 6 章：接着上一次往下算（缓存） ----------
+ * 下面三个算子是上面三个的推广：把序列分几次交给它们，每次只给新来的 token，同时给出前面
+ * 留下的东西，结果与把整条序列一次交给原来的算子逐位相同（求和的项和次序完全一样）。
+ * 原来的三个就是它们在“前面什么都没有”时的特例。 */
+
+/* 因果卷积，前面接上 nh 行历史 hist（[nh, c]，是紧挨在 x 前面的 nh 个 token 的输入，nh <= k-1）。 */
+void op_conv1d_hist(float *y, const float *x, const float *hist, size_t nh, const float *w,
+                    size_t n, size_t c, size_t k);
+
+/* 注意力，前面已经有 past 个 token。q、y 是 n 个新 token 的 [n, heads, d]；k、v 是全部
+ * past + n 个 token 的 [past + n, kv, d]（前 past 行来自缓存）。第 t 个新 token 的位置是 past + t，
+ * 看位置 0 .. past + t。 */
+int  op_attention_past(float *y, const float *q, const float *k, const float *v, size_t n, size_t past,
+                       size_t heads, size_t kv, size_t d, double scale, char *err, size_t errcap);
+
+/* 门控 delta 规则，从给定的状态出发。state 是 [hv, dk, dv] 的 double，进来时是处理完前面那些
+ * token 之后的状态，出去时更新为处理完这 n 个 token 之后的状态。 */
+int  op_gated_delta_state(float *y, const float *q, const float *k, const float *v, const float *g,
+                          const float *beta, double *state, size_t n, size_t hk, size_t hv, size_t dk, size_t dv,
+                          char *err, size_t errcap);
+
 #endif

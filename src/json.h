@@ -24,6 +24,8 @@ struct jval {
  * 同一个对象里出现重复的键算失败。 */
 int  json_parse(jval *root, const char *s, size_t n, char *err, size_t errcap);
 void json_free(jval *v);
+/* 读整个文件再解析（第 6 章从 model.c 挪过来，config.json 和 generation_config.json 共用）。 */
+int  json_parse_file(jval *root, const char *path, char *err, size_t errcap);
 
 /* 在对象里按键查找（线性查找，只用于小对象）；找不到或 v 不是对象返回 NULL。 */
 const jval *json_get(const jval *v, const char *key);

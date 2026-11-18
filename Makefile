@@ -6,7 +6,7 @@ PYTHON  ?= python3
 
 TOK_SRC = src/tok.c src/json.c src/unicode.c src/unicode_tables.c src/chat.c src/sha256.c
 
-all: $(BUILD)/st_dump $(BUILD)/tok $(BUILD)/ops $(BUILD)/layer $(BUILD)/forward
+all: $(BUILD)/st_dump $(BUILD)/tok $(BUILD)/ops $(BUILD)/layer $(BUILD)/forward $(BUILD)/generate
 
 $(BUILD)/st_dump: tools/st_dump.c src/st.c src/st.h
 	@mkdir -p $(BUILD)
@@ -31,13 +31,21 @@ $(BUILD)/forward: tools/forward.c $(MODEL_SRC) $(MODEL_HDR)
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(SAN) -o $@ tools/forward.c $(MODEL_SRC) -lm
 
-# 第 1 到 5 章的快速测试
-test: $(BUILD)/st_dump $(BUILD)/tok $(BUILD)/ops $(BUILD)/layer $(BUILD)/forward
+GEN_SRC = $(MODEL_SRC) src/gen.c src/sample.c
+GEN_HDR = $(MODEL_HDR) src/gen.h src/sample.h
+
+$(BUILD)/generate: tools/generate.c $(GEN_SRC) $(GEN_HDR)
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(SAN) -o $@ tools/generate.c $(GEN_SRC) -lm
+
+# 第 1 到 6 章的快速测试
+test: $(BUILD)/st_dump $(BUILD)/tok $(BUILD)/ops $(BUILD)/layer $(BUILD)/forward $(BUILD)/generate
 	sh tests/run.sh $(BUILD)
 	sh tests/run_tok.sh $(BUILD)
 	PYTHON=$(PYTHON) sh tests/run_ops.sh $(BUILD)
 	PYTHON=$(PYTHON) sh tests/run_layer.sh $(BUILD)
 	PYTHON=$(PYTHON) sh tests/run_model.sh $(BUILD)
+	PYTHON=$(PYTHON) sh tests/run_gen.sh $(BUILD)
 
 # 第 3 章：拿真实模型的权重当算子输入，例如
 #   make test-ops-real MODEL=/data/models/Qwen3.8-27B
@@ -58,6 +66,13 @@ FAST = $(BUILD)/fast
 test-model-real: $(BUILD)/tok
 	$(MAKE) BUILD=$(FAST) SAN= CFLAGS="$(subst -O1,-O2,$(CFLAGS))" $(FAST)/forward
 	PYTHON=$(PYTHON) FORWARD=$(FAST)/forward sh tests/run_model.sh $(BUILD) real $(MODEL)
+
+# 第 6 章：在真实模型上做带缓存的生成（贪心和按 generation_config.json 采样），与不带缓存的前向逐位对拍，例如
+#   make test-gen-real MODEL=/data/models/Qwen3.8-27B PYTHON=$HOME/venvs/x/bin/python
+# 和第 5 章一样用 -O2、不带 ASan 另建一份。
+test-gen-real: $(BUILD)/tok
+	$(MAKE) BUILD=$(FAST) SAN= CFLAGS="$(subst -O1,-O2,$(CFLAGS))" $(FAST)/forward $(FAST)/generate
+	PYTHON=$(PYTHON) FORWARD=$(FAST)/forward GENERATE=$(FAST)/generate sh tests/run_gen.sh $(BUILD) real $(MODEL)
 
 # 第 2 章：全部 Unicode 码点的穷举对拍，几分钟
 test-unicode: $(BUILD)/tok
@@ -80,4 +95,4 @@ unicode-tables: tools/gen_unicode.c
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all test test-unicode test-real test-ops-real test-layer-real test-model-real unicode-tables clean
+.PHONY: all test test-unicode test-real test-ops-real test-layer-real test-model-real test-gen-real unicode-tables clean

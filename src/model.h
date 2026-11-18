@@ -20,6 +20,7 @@ typedef struct {
     double theta;
     /* 线性注意力 */
     size_t lk_heads, lv_heads, lk_dim, lv_dim, conv_k;
+    size_t max_pos;                   /* max_position_embeddings：位置的上限（第 6 章用） */
 } model_cfg;
 
 /* 读 config.json（多模态模型读其中的 text_config）。成功返回 0，失败返回 -1 并把原因写进 err。 */
@@ -82,5 +83,36 @@ int  model_forward(const model *m, const int32_t *ids, size_t n, float *logits,
 /* 贪心解码选哪个 token：分数最大的那个；有几个同样大时取 id 最小的。
  * 有 NaN 时报错返回 -1（NaN 和谁比都是假，不报错的话结果取决于它出现在哪）。 */
 int  logits_argmax(const float *row, size_t vocab, int32_t *out, char *err, size_t errcap);
+
+/* ---------- 第 6 章：缓存 ----------
+ *
+ * 生成时每次只给新来的 token，前面那些 token 留下的东西存在缓存里：
+ *   全注意力层   每个 token RoPE 之后的 k 和 v（“KV 缓存”），随序列变长
+ *   线性注意力层 卷积要往前看的最近 conv_k-1 个 token 的输入，和门控 delta 规则的状态矩阵，
+ *                大小固定
+ * 分几次交给 model_step 与一次交给 model_forward，logits 逐位相同。 */
+
+typedef struct {
+    float *k, *v;            /* 全注意力层：[cap, kv_heads * head_dim] */
+    float *conv;             /* 线性注意力层：[conv_k - 1, 卷积的通道数]，旧的在前 */
+    double *S;               /* 线性注意力层：[lv_heads, lk_dim, lv_dim] */
+} layer_cache;
+
+typedef struct {
+    size_t n_layers;
+    size_t cap, len;         /* 最多能放多少个 token、已经放了多少个 */
+    int broken;              /* model_step 中途出错后为 1，缓存不能再用 */
+    layer_cache *layers;
+} model_cache;
+
+/* 建一个能放 cap 个 token 的空缓存。cap 不能超过 max_position_embeddings。 */
+int  model_cache_init(model_cache *kc, const model_cfg *c, size_t cap, char *err, size_t errcap);
+void model_cache_free(model_cache *kc);
+
+/* 把 n 个新 token 接在缓存里的 kc->len 个 token 后面算一遍，位置是 kc->len .. kc->len + n - 1。
+ * logits 是 [n, vocab]，与 model_forward 对“缓存里的 token 加上这 n 个”算出的最后 n 行逐位相同。
+ * 成功后 kc->len 增加 n。放不下时报错，缓存不变；中途出错时缓存标记为损坏。 */
+int  model_step(const model *m, model_cache *kc, const int32_t *ids, size_t n, float *logits,
+                trace_fn trace, void *ctx, char *err, size_t errcap);
 
 #endif
