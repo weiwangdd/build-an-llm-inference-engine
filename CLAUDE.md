@@ -28,6 +28,7 @@ make test-layer-real MODEL=<模型目录> PYTHON=...   # 第 4 章：真实模�
 make test-model-real MODEL=<模型目录> PYTHON=...   # 第 5 章：整模前向加贪心解码 8 个 token，用 -O2 无 ASan 另建的 build/fast/forward
 make test-gen-real MODEL=<模型目录> PYTHON=...     # 第 6 章：带缓存贪心 8 个 + 对话模板采样，与不带缓存逐位对拍，同样用 build/fast
 make unicode-tables  # 从 UCD 9.0 和 16.0 重新生成 src/unicode_tables.c（下载地址见 tools/gen_unicode.c）
+tools/ask.sh [-n N] [-s S] [-g] [-t] "问题"   # 向真实模型提问（MODEL 默认 /data/models/Qwen3.8-27B），边生成边打印，用 build/fast 的 -O2 程序
 ```
 
 单独跑某一章：`sh tests/run.sh build`（第 1 章）、`sh tests/run_tok.sh build`（第 2 章）、`sh tests/run_ops.sh build`（第 3 章）、`sh tests/run_layer.sh build`（第 4 章）、`sh tests/run_model.sh build`（第 5 章）或 `sh tests/run_gen.sh build`（第 6 章），参数见脚本头部。单个对拍可以手工跑两边再 diff，例如：
