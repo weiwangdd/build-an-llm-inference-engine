@@ -303,7 +303,7 @@ static int load_merges(tok *t, const jval *merges, char *err, size_t cap) {
 
 int tok_load(tok **out, const char *path, char *err, size_t cap) {
     init_byte_map();
-    char *buf; size_t n;
+    char *buf = NULL; size_t n = 0;     /* 赋初值只为让 gcc -O2 不误报“可能未初始化” */
     if (read_file(path, &buf, &n, err, cap)) return -1;
     jval root;
     int rc = json_parse(&root, buf, n, err, cap);
