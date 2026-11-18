@@ -275,3 +275,26 @@ int json_int(const jval *v, int64_t *out) {
     *out = neg ? (int64_t)(0 - x) : (int64_t)x;
     return 0;
 }
+
+int json_parse_file(jval *root, const char *path, char *err, size_t cap) {
+    FILE *f = fopen(path, "rb");
+    if (!f) { if (err && cap) snprintf(err, cap, "打不开 %s", path); return -1; }
+    char *buf = NULL;
+    size_t n = 0, capb = 0;
+    for (;;) {
+        if (n == capb) {
+            char *nb = realloc(buf, capb = capb ? 2 * capb : 8192);
+            if (!nb) { free(buf); fclose(f); if (err && cap) snprintf(err, cap, "内存不足"); return -1; }
+            buf = nb;
+        }
+        size_t r = fread(buf + n, 1, capb - n, f);
+        n += r;
+        if (r == 0) break;
+    }
+    int bad = ferror(f);
+    fclose(f);
+    if (bad) { free(buf); if (err && cap) snprintf(err, cap, "读 %s 出错", path); return -1; }
+    int rc = json_parse(root, buf, n, err, cap);
+    free(buf);
+    return rc;
+}

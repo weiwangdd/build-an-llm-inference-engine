@@ -81,7 +81,8 @@ static int parse_cfg(model_cfg *c, const jval *root, char *err, size_t cap) {
         get_size(t, "linear_num_value_heads", &c->lv_heads, err, cap) ||
         get_size(t, "linear_key_head_dim", &c->lk_dim, err, cap) ||
         get_size(t, "linear_value_head_dim", &c->lv_dim, err, cap) ||
-        get_size(t, "linear_conv_kernel_dim", &c->conv_k, err, cap))
+        get_size(t, "linear_conv_kernel_dim", &c->conv_k, err, cap) ||
+        get_size(t, "max_position_embeddings", &c->max_pos, err, cap))
         return -1;
     if (want_str(t, "hidden_act", "silu", 1, err, cap) || want_false(t, "attention_bias", err, cap) ||
         want_str(t, "output_gate_type", "swish", 0, err, cap))
@@ -117,28 +118,9 @@ static int parse_cfg(model_cfg *c, const jval *root, char *err, size_t cap) {
 }
 
 int model_cfg_load(model_cfg *c, const char *path, char *err, size_t cap) {
-    FILE *f = fopen(path, "rb");
-    if (!f) return fail(err, cap, "打不开 %s", path);
-    char *buf = NULL;
-    size_t n = 0, capb = 0;
-    for (;;) {
-        if (n == capb) {
-            char *nb = realloc(buf, capb = capb ? 2 * capb : 8192);
-            if (!nb) { free(buf); fclose(f); return fail(err, cap, "内存不足"); }
-            buf = nb;
-        }
-        size_t r = fread(buf + n, 1, capb - n, f);
-        n += r;
-        if (r == 0) break;
-    }
-    int bad = ferror(f);
-    fclose(f);
-    if (bad) { free(buf); return fail(err, cap, "读 %s 出错", path); }
     jval root;
-    int rc = json_parse(&root, buf, n, err, cap);
-    free(buf);
-    if (rc) return -1;
-    rc = parse_cfg(c, &root, err, cap);
+    if (json_parse_file(&root, path, err, cap)) return -1;
+    int rc = parse_cfg(c, &root, err, cap);
     json_free(&root);
     return rc;
 }
@@ -243,12 +225,16 @@ static void tr(trace_fn f, void *ctx, const char *name, const float *x, size_t r
 static void mm(float *y, const float *x, const bf16_mat *w, size_t n) { op_matmul(y, x, w->data, n, w->cols, w->rows); }
 
 /* 全注意力。x 是归一化之后的输入 [n, hidden]，结果写进 out [n, hidden]。 */
-static int full_attention(float *out, const float *x, size_t n, const int32_t *pos, const model_cfg *c,
-                          const layer_w *w, trace_fn T, void *ctx, char *err, size_t cap) {
+/* lc 不为 NULL 时（第 6 章）：前面已经有 past 个 token，它们 RoPE 之后的 k 和 v 在 lc->k、lc->v 的前 past 行；
+ * 这 n 个新 token 的 k、v 接着写进去，注意力对全部 past + n 行算。lc 为 NULL 时 past 必须是 0。 */
+static int full_attention(float *out, const float *x, size_t n, const int32_t *pos, size_t past, const model_cfg *c,
+                          const layer_w *w, layer_cache *lc, trace_fn T, void *ctx, char *err, size_t cap) {
     size_t hd = c->head_dim, nh = c->heads, nkv = c->kv_heads, qd = nh * hd, kd = nkv * hd;
     float *qg = malloc(n * 2 * qd * sizeof *qg), *q = malloc(n * qd * sizeof *q), *gate = malloc(n * qd * sizeof *gate);
     float *k = malloc(n * kd * sizeof *k), *v = malloc(n * kd * sizeof *v);
     float *t1 = malloc(n * qd * sizeof *t1), *t2 = malloc(n * qd * sizeof *t2);
+    float *kall = lc ? lc->k : k, *vall = lc ? lc->v : v;   /* 全部 past + n 个 token 的 k、v */
+    float *knew = kall + past * kd;                          /* 新 token 的 k 写在这里 */
     int rc = -1;
     if (!qg || !q || !gate || !k || !v || !t1 || !t2) { fail(err, cap, "内存不足"); goto done; }
 
@@ -261,11 +247,12 @@ static int full_attention(float *out, const float *x, size_t n, const int32_t *p
         }
     mm(k, x, &w->k, n);                      tr(T, ctx, "k_proj", k, n, kd);
     mm(v, x, &w->v, n);                      tr(T, ctx, "v_proj", v, n, kd);
+    if (lc) memcpy(vall + past * kd, v, n * kd * sizeof *v);
     op_rmsnorm(t1, q, w->q_norm, n * nh, hd, c->eps);          tr(T, ctx, "q_norm", t1, n, qd);
     op_rope(q, t1, pos, n, nh, hd, c->rot, c->theta);          tr(T, ctx, "q_rope", q, n, qd);
     op_rmsnorm(t1, k, w->k_norm, n * nkv, hd, c->eps);         tr(T, ctx, "k_norm", t1, n, kd);
-    op_rope(k, t1, pos, n, nkv, hd, c->rot, c->theta);         tr(T, ctx, "k_rope", k, n, kd);
-    if (op_attention(t1, q, k, v, n, nh, nkv, hd, 1.0 / sqrt((double)hd), err, cap)) goto done;
+    op_rope(knew, t1, pos, n, nkv, hd, c->rot, c->theta);      tr(T, ctx, "k_rope", knew, n, kd);
+    if (op_attention_past(t1, q, kall, vall, n, past, nh, nkv, hd, 1.0 / sqrt((double)hd), err, cap)) goto done;
     tr(T, ctx, "attn", t1, n, qd);
     op_sigmoid(t2, gate, n * qd);                              tr(T, ctx, "gate_sigmoid", t2, n, qd);
     op_mul(q, t1, t2, n * qd);                                 tr(T, ctx, "gated", q, n, qd);
@@ -277,8 +264,10 @@ done:
 }
 
 /* 线性注意力（门控 delta 规则）。 */
-static int linear_attention(float *out, const float *x, size_t n, const model_cfg *c, const layer_w *w,
-                            trace_fn T, void *ctx, char *err, size_t cap) {
+/* lc 不为 NULL 时（第 6 章）：卷积接着 lc->conv 里前面几个 token 的输入算，门控 delta 规则从 lc->S 出发，
+ * 算完把两者更新成包含这 n 个 token 之后的样子。lc 为 NULL 时从零开始。 */
+static int linear_attention(float *out, const float *x, size_t n, size_t past, const model_cfg *c, const layer_w *w,
+                            layer_cache *lc, trace_fn T, void *ctx, char *err, size_t cap) {
     size_t hk = c->lk_heads, hv = c->lv_heads, dk = c->lk_dim, dv = c->lv_dim;
     size_t kd = hk * dk, vd = hv * dv, cd = 2 * kd + vd;
     float *qkv = malloc(n * cd * sizeof *qkv), *cv = malloc(n * cd * sizeof *cv);
@@ -293,7 +282,20 @@ static int linear_attention(float *out, const float *x, size_t n, const model_cf
     mm(z, x, &w->z, n);                      tr(T, ctx, "z", z, n, vd);
     mm(b, x, &w->b, n);                      tr(T, ctx, "b", b, n, hv);
     mm(a, x, &w->a, n);                      tr(T, ctx, "a", a, n, hv);
-    op_conv1d(cv, qkv, w->conv, n, cd, c->conv_k);             tr(T, ctx, "conv", cv, n, cd);
+    size_t kw = c->conv_k - 1, nh = lc ? (past < kw ? past : kw) : 0;     /* 卷积要往前看 kw 个 token */
+    op_conv1d_hist(cv, qkv, lc ? lc->conv : NULL, nh, w->conv, n, cd, c->conv_k);
+    tr(T, ctx, "conv", cv, n, cd);
+    if (lc) {                                 /* 把“历史 + 新 token”的最后 kw 行留作下一次的历史 */
+        size_t total = nh + n, keep = total < kw ? total : kw;
+        float *tmp = malloc((keep ? keep : 1) * cd * sizeof *tmp);
+        if (!tmp) { fail(err, cap, "内存不足"); goto done; }
+        for (size_t r = 0; r < keep; r++) {
+            size_t src = total - keep + r;
+            memcpy(tmp + r * cd, src < nh ? lc->conv + src * cd : qkv + (src - nh) * cd, cd * sizeof *tmp);
+        }
+        memcpy(lc->conv, tmp, keep * cd * sizeof *tmp);
+        free(tmp);
+    }
     op_silu(qkv, cv, n * cd);                                  tr(T, ctx, "conv_silu", qkv, n, cd);
     /* 卷积之后再切开：每个 token 的 cd 维依次是 q（kd 维）、k（kd 维）、v（vd 维） */
     for (size_t t = 0; t < n; t++) {
@@ -305,7 +307,8 @@ static int linear_attention(float *out, const float *x, size_t n, const model_cf
     op_l2norm(k, cv + n * kd, n * hk, dk, 1e-6);               tr(T, ctx, "k_l2", k, n, kd);
     op_sigmoid(beta, b, n * hv);                               tr(T, ctx, "beta", beta, n, hv);
     op_decay(g, a, w->A_log, w->dt_bias, n, hv);               tr(T, ctx, "g", g, n, hv);
-    if (op_gated_delta(core, q, k, v, g, beta, n, hk, hv, dk, dv, err, cap)) goto done;
+    if (lc ? op_gated_delta_state(core, q, k, v, g, beta, lc->S, n, hk, hv, dk, dv, err, cap)
+           : op_gated_delta(core, q, k, v, g, beta, n, hk, hv, dk, dv, err, cap)) goto done;
     tr(T, ctx, "delta", core, n, vd);
     op_rmsnorm_gated(v, core, z, w->gnorm, n * hv, dv, c->eps); tr(T, ctx, "gnorm", v, n, vd);
     mm(out, v, &w->out, n);
@@ -315,8 +318,10 @@ done:
     return rc;
 }
 
-int layer_forward(float *h, size_t n, const int32_t *pos, const model_cfg *c, const layer_w *w,
-                  trace_fn T, void *ctx, char *err, size_t cap) {
+/* 一层的前向。lc 为 NULL 时就是第 4 章的 layer_forward；不为 NULL 时（第 6 章）前面已经有 past 个 token，
+ * 它们留下的东西在 lc 里，算完把这 n 个 token 的也放进去。 */
+static int layer_run(float *h, size_t n, const int32_t *pos, size_t past, const model_cfg *c, const layer_w *w,
+                     layer_cache *lc, trace_fn T, void *ctx, char *err, size_t cap) {
     size_t H = c->hidden, I = c->inter;
     float *x = malloc(n * H * sizeof *x), *y = malloc(n * H * sizeof *y);
     float *gt = malloc(n * I * sizeof *gt), *up = malloc(n * I * sizeof *up), *act = malloc(n * I * sizeof *act);
@@ -325,8 +330,8 @@ int layer_forward(float *h, size_t n, const int32_t *pos, const model_cfg *c, co
 
     /* h = h + 注意力(RMSNorm(h)) */
     op_rmsnorm(x, h, w->in_norm, n, H, c->eps);                tr(T, ctx, "attn_in", x, n, H);
-    if (w->full ? full_attention(y, x, n, pos, c, w, T, ctx, err, cap)
-                : linear_attention(y, x, n, c, w, T, ctx, err, cap)) goto done;
+    if (w->full ? full_attention(y, x, n, pos, past, c, w, lc, T, ctx, err, cap)
+                : linear_attention(y, x, n, past, c, w, lc, T, ctx, err, cap)) goto done;
     tr(T, ctx, "attn_out", y, n, H);
     op_add(h, h, y, n * H);                                    tr(T, ctx, "resid", h, n, H);
 
@@ -342,6 +347,11 @@ int layer_forward(float *h, size_t n, const int32_t *pos, const model_cfg *c, co
 done:
     free(x); free(y); free(gt); free(up); free(act);
     return rc;
+}
+
+int layer_forward(float *h, size_t n, const int32_t *pos, const model_cfg *c, const layer_w *w,
+                  trace_fn T, void *ctx, char *err, size_t cap) {
+    return layer_run(h, n, pos, 0, c, w, NULL, T, ctx, err, cap);
 }
 
 /* ---------- 第 5 章：整个模型 ---------- */
@@ -386,21 +396,24 @@ static void prefixed(void *p, const char *name, const float *x, size_t rows, siz
     pc->f(pc->ctx, nm, x, rows, cols);
 }
 
-int model_forward(const model *m, const int32_t *ids, size_t n, float *logits,
-                  trace_fn T, void *ctx, char *err, size_t cap) {
+/* 整个模型。kc 为 NULL 时是第 5 章的 model_forward（位置从 0 开始）；不为 NULL 时（第 6 章）
+ * 这 n 个 token 接在缓存里那 kc->len 个后面，位置从 kc->len 开始。 */
+static int model_run(const model *m, model_cache *kc, const int32_t *ids, size_t n, float *logits,
+                     trace_fn T, void *ctx, char *err, size_t cap) {
     const model_cfg *c = &m->cfg;
-    size_t H = c->hidden;
+    size_t H = c->hidden, past = kc ? kc->len : 0;
     float *h = malloc(n * H * sizeof *h), *x = malloc(n * H * sizeof *x);
     int32_t *pos = malloc(n * sizeof *pos);
     int rc = -1;
     if (!h || !x || !pos) { fail(err, cap, "内存不足"); goto done; }
-    for (size_t t = 0; t < n; t++) pos[t] = (int32_t)t;
+    for (size_t t = 0; t < n; t++) pos[t] = (int32_t)(past + t);
 
     if (op_embed(h, m->embed, c->vocab, H, ids, n, err, cap)) goto done;
     tr(T, ctx, "embed", h, n, H);
     for (size_t i = 0; i < c->n_layers; i++) {        /* 每一层的输出就是下一层的输入 */
         prefix_ctx pc = {T, ctx, i};
-        if (layer_forward(h, n, pos, c, &m->layers[i], T ? prefixed : NULL, &pc, err, cap)) goto done;
+        if (layer_run(h, n, pos, past, c, &m->layers[i], kc ? &kc->layers[i] : NULL,
+                      T ? prefixed : NULL, &pc, err, cap)) goto done;
     }
     op_rmsnorm(x, h, m->final_norm, n, H, c->eps);    tr(T, ctx, "final_norm", x, n, H);
     mm(logits, x, &m->lm_head, n);                    tr(T, ctx, "logits", logits, n, c->vocab);
@@ -408,6 +421,66 @@ int model_forward(const model *m, const int32_t *ids, size_t n, float *logits,
 done:
     free(h); free(x); free(pos);
     return rc;
+}
+
+int model_forward(const model *m, const int32_t *ids, size_t n, float *logits,
+                  trace_fn T, void *ctx, char *err, size_t cap) {
+    return model_run(m, NULL, ids, n, logits, T, ctx, err, cap);
+}
+
+/* ---------- 第 6 章：缓存 ---------- */
+
+void model_cache_free(model_cache *kc) {
+    if (kc->layers)
+        for (size_t i = 0; i < kc->n_layers; i++) {
+            layer_cache *lc = &kc->layers[i];
+            free(lc->k); free(lc->v); free(lc->conv); free(lc->S);
+        }
+    free(kc->layers);
+    memset(kc, 0, sizeof *kc);
+}
+
+int model_cache_init(model_cache *kc, const model_cfg *c, size_t cap, char *err, size_t errcap) {
+    memset(kc, 0, sizeof *kc);
+    if (cap == 0 || cap > c->max_pos)
+        return fail(err, errcap, "缓存容量 %zu 应在 1 到 max_position_embeddings（%zu）之间", cap, c->max_pos);
+    kc->layers = calloc(c->n_layers, sizeof *kc->layers);
+    if (!kc->layers) return fail(err, errcap, "内存不足");
+    kc->n_layers = c->n_layers;
+    kc->cap = cap;
+    size_t kd = c->kv_heads * c->head_dim;
+    size_t cd = 2 * c->lk_heads * c->lk_dim + c->lv_heads * c->lv_dim;
+    for (size_t i = 0; i < c->n_layers; i++) {
+        layer_cache *lc = &kc->layers[i];
+        if (c->full[i]) {          /* 全注意力：每个 token 一行 k、一行 v，随序列变长 */
+            lc->k = malloc(cap * kd * sizeof *lc->k);
+            lc->v = malloc(cap * kd * sizeof *lc->v);
+            if (!lc->k || !lc->v) goto oom;
+        } else {                   /* 线性注意力：大小固定，与序列多长无关 */
+            lc->conv = malloc((c->conv_k > 1 ? c->conv_k - 1 : 1) * cd * sizeof *lc->conv);
+            lc->S = calloc(c->lv_heads * c->lk_dim * c->lv_dim, sizeof *lc->S);
+            if (!lc->conv || !lc->S) goto oom;
+        }
+    }
+    return 0;
+oom:
+    model_cache_free(kc);
+    return fail(err, errcap, "内存不足（缓存）");
+}
+
+int model_step(const model *m, model_cache *kc, const int32_t *ids, size_t n, float *logits,
+               trace_fn T, void *ctx, char *err, size_t cap) {
+    if (kc->broken) return fail(err, cap, "缓存在上一次出错时已经损坏，不能接着用");
+    if (kc->n_layers != m->cfg.n_layers) return fail(err, cap, "缓存与模型的层数不符");
+    if (n == 0) return fail(err, cap, "至少要给一个 token");
+    if (n > kc->cap - kc->len)
+        return fail(err, cap, "缓存已有 %zu 个 token，再放 %zu 个会超过容量 %zu", kc->len, n, kc->cap);
+    if (model_run(m, kc, ids, n, logits, T, ctx, err, cap)) {
+        kc->broken = 1;            /* 前面几层可能已经写进了这 n 个 token，后面几层没有 */
+        return -1;
+    }
+    kc->len += n;
+    return 0;
 }
 
 int logits_argmax(const float *row, size_t vocab, int32_t *out, char *err, size_t cap) {

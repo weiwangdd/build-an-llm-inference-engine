@@ -121,13 +121,21 @@ void op_rope(float *y, const float *x, const int32_t *pos, size_t n, size_t head
 }
 
 void op_conv1d(float *y, const float *x, const float *w, size_t n, size_t c, size_t k) {
+    op_conv1d_hist(y, x, NULL, 0, w, n, c, k);
+}
+
+/* 第 6 章：前面接上 nh 行历史。把 hist 和 x 看成一条 nh + n 行的序列，只算后 n 行的输出。
+ * 求和的项和次序与“把整条序列一次交给 op_conv1d”完全相同，所以结果逐位相同。 */
+void op_conv1d_hist(float *y, const float *x, const float *hist, size_t nh, const float *w,
+                    size_t n, size_t c, size_t k) {
     for (size_t t = 0; t < n; t++) {
         for (size_t j = 0; j < c; j++) {
             double acc = 0;
             for (size_t i = 0; i < k; i++) {
-                if (t + i < k - 1) continue;              /* 对应的 token 在序列开头之前 */
-                size_t src = t + i - (k - 1);
-                acc += (double)w[j * k + i] * (double)x[src * c + j];
+                if (nh + t + i < k - 1) continue;         /* 对应的 token 在序列开头之前 */
+                size_t src = nh + t + i - (k - 1);        /* 在“历史 + 新 token”里的行号 */
+                const float *row = src < nh ? hist + src * c : x + (src - nh) * c;
+                acc += (double)w[j * k + i] * (double)row[j];
             }
             y[t * c + j] = (float)acc;
         }
@@ -157,24 +165,30 @@ static int oom(char *err, size_t errcap) {
 
 int op_attention(float *y, const float *q, const float *k, const float *v,
                  size_t n, size_t heads, size_t kv, size_t d, double scale, char *err, size_t errcap) {
-    double *p = malloc(n * sizeof *p), *acc = malloc(d * sizeof *acc);
+    return op_attention_past(y, q, k, v, n, 0, heads, kv, d, scale, err, errcap);
+}
+
+int op_attention_past(float *y, const float *q, const float *k, const float *v, size_t n, size_t past,
+                      size_t heads, size_t kv, size_t d, double scale, char *err, size_t errcap) {
+    double *p = malloc((past + n) * sizeof *p), *acc = malloc(d * sizeof *acc);
     if (!p || !acc) { free(p); free(acc); return oom(err, errcap); }
     size_t group = heads / kv;
     for (size_t t = 0; t < n; t++) {
+        size_t last = past + t;                             /* 第 t 个新 token 在整条序列里的位置 */
         for (size_t h = 0; h < heads; h++) {
             const float *qh = q + (t * heads + h) * d;
             size_t g = h / group;
             double m = -INFINITY, sum = 0;
-            for (size_t s = 0; s <= t; s++) {               /* 因果：只看位置 0 .. t */
+            for (size_t s = 0; s <= last; s++) {            /* 因果：只看位置 0 .. last */
                 const float *ks = k + (s * kv + g) * d;
                 double dot = 0;
                 for (size_t i = 0; i < d; i++) dot += (double)qh[i] * (double)ks[i];
                 p[s] = dot * scale;
                 if (p[s] > m) m = p[s];
             }
-            for (size_t s = 0; s <= t; s++) { p[s] = exp(p[s] - m); sum += p[s]; }
+            for (size_t s = 0; s <= last; s++) { p[s] = exp(p[s] - m); sum += p[s]; }
             for (size_t i = 0; i < d; i++) acc[i] = 0;
-            for (size_t s = 0; s <= t; s++) {
+            for (size_t s = 0; s <= last; s++) {
                 const float *vs = v + (s * kv + g) * d;
                 for (size_t i = 0; i < d; i++) acc[i] += p[s] * (double)vs[i];
             }
@@ -187,13 +201,23 @@ int op_attention(float *y, const float *q, const float *k, const float *v,
 
 int op_gated_delta(float *y, const float *q, const float *k, const float *v, const float *g, const float *beta,
                    size_t n, size_t hk, size_t hv, size_t dk, size_t dv, char *err, size_t errcap) {
-    double *S = malloc(dk * dv * sizeof *S), *u = malloc(dv * sizeof *u);
-    if (!S || !u) { free(S); free(u); return oom(err, errcap); }
+    double *S = calloc(hv * dk * dv, sizeof *S);           /* 状态的初值为 0 */
+    if (!S) return oom(err, errcap);
+    int rc = op_gated_delta_state(y, q, k, v, g, beta, S, n, hk, hv, dk, dv, err, errcap);
+    free(S);
+    return rc;
+}
+
+int op_gated_delta_state(float *y, const float *q, const float *k, const float *v, const float *g,
+                         const float *beta, double *state, size_t n, size_t hk, size_t hv, size_t dk, size_t dv,
+                         char *err, size_t errcap) {
+    double *u = malloc(dv * sizeof *u);
+    if (!u) return oom(err, errcap);
     size_t group = hv / hk;
     double scale = 1.0 / sqrt((double)dk);
     for (size_t j = 0; j < hv; j++) {                       /* 各个值头互不相干，一个一个算 */
         size_t kh = j / group;
-        for (size_t i = 0; i < dk * dv; i++) S[i] = 0;
+        double *S = state + j * dk * dv;                    /* 第 j 个值头的状态，接着上次的往下算 */
         for (size_t t = 0; t < n; t++) {
             const float *qt = q + (t * hk + kh) * dk, *kt = k + (t * hk + kh) * dk;
             const float *vt = v + (t * hv + j) * dv;
@@ -213,6 +237,6 @@ int op_gated_delta(float *y, const float *q, const float *k, const float *v, con
             }
         }
     }
-    free(S); free(u);
+    free(u);
     return 0;
 }
