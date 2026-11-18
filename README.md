@@ -43,6 +43,13 @@ make test-gen-real MODEL=<模型目录> PYTHON=$HOME/venvs/tok/bin/python     # 
 
 如果系统的 `python3` 已经装了 `tokenizers`，可以省略 `PYTHON=`。
 
+想自己向模型提问，可以用 `tools/ask.sh`。它套上对话模板，用第 6 章的生成循环边生成边打印（另建一份 `-O2`、不带 ASan 的程序到 `build/fast`）。现在是 CPU 单线程，每个 token 约 13.5 秒，一个问题要好几分钟：
+
+```
+tools/ask.sh "中国的首都是哪里？"                  # 默认用 /data/models/Qwen3.8-27B，可用 MODEL=<模型目录> 指定
+tools/ask.sh -n 200 -s 42 "用三句话解释什么是大模型推理"   # -n 最多生成几个 token，-s 种子，-g 贪心，-t 思考模式
+```
+
 ## 许可
 
 代码（`book/` 以外的所有文件）采用 [MIT 许可](LICENSE)。`book/` 下的正文采用 [CC BY-NC-ND 4.0](book/LICENSE.md)。
