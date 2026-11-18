@@ -6,7 +6,7 @@ PYTHON  ?= python3
 
 TOK_SRC = src/tok.c src/json.c src/unicode.c src/unicode_tables.c src/chat.c src/sha256.c
 
-all: $(BUILD)/st_dump $(BUILD)/tok $(BUILD)/ops $(BUILD)/layer
+all: $(BUILD)/st_dump $(BUILD)/tok $(BUILD)/ops $(BUILD)/layer $(BUILD)/forward
 
 $(BUILD)/st_dump: tools/st_dump.c src/st.c src/st.h
 	@mkdir -p $(BUILD)
@@ -24,12 +24,20 @@ $(BUILD)/layer: tools/layer.c src/model.c src/model.h src/ops.c src/ops.h src/st
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(SAN) -o $@ tools/layer.c src/model.c src/ops.c src/st.c src/json.c -lm
 
-# 第 1 到 4 章的快速测试
-test: $(BUILD)/st_dump $(BUILD)/tok $(BUILD)/ops $(BUILD)/layer
+MODEL_SRC = src/model.c src/ops.c src/st.c src/json.c
+MODEL_HDR = src/model.h src/ops.h src/st.h src/json.h
+
+$(BUILD)/forward: tools/forward.c $(MODEL_SRC) $(MODEL_HDR)
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(SAN) -o $@ tools/forward.c $(MODEL_SRC) -lm
+
+# 第 1 到 5 章的快速测试
+test: $(BUILD)/st_dump $(BUILD)/tok $(BUILD)/ops $(BUILD)/layer $(BUILD)/forward
 	sh tests/run.sh $(BUILD)
 	sh tests/run_tok.sh $(BUILD)
 	PYTHON=$(PYTHON) sh tests/run_ops.sh $(BUILD)
 	PYTHON=$(PYTHON) sh tests/run_layer.sh $(BUILD)
+	PYTHON=$(PYTHON) sh tests/run_model.sh $(BUILD)
 
 # 第 3 章：拿真实模型的权重当算子输入，例如
 #   make test-ops-real MODEL=/data/models/Qwen3.8-27B
@@ -41,6 +49,15 @@ test-ops-real: $(BUILD)/ops
 # 第二层对拍需要 PYTHON 里装了 torch 和 transformers，没装就只做第一层。
 test-layer-real: $(BUILD)/layer $(BUILD)/tok
 	PYTHON=$(PYTHON) sh tests/run_layer.sh $(BUILD) real $(MODEL)
+
+# 第 5 章：在真实模型上做整模前向和贪心解码的对拍，例如
+#   make test-model-real MODEL=/data/models/Qwen3.8-27B PYTHON=$HOME/venvs/x/bin/python
+# 27B 每个 token 要算约 260 亿次乘加，开着 ASan 太慢，所以这里另外用 -O2、不带 ASan 构建一份到
+# $(BUILD)/fast，代码完全相同。ASan 的检查由 make test 在小模型上做，走的是同一份代码。
+FAST = $(BUILD)/fast
+test-model-real: $(BUILD)/tok
+	$(MAKE) BUILD=$(FAST) SAN= CFLAGS="$(subst -O1,-O2,$(CFLAGS))" $(FAST)/forward
+	PYTHON=$(PYTHON) FORWARD=$(FAST)/forward sh tests/run_model.sh $(BUILD) real $(MODEL)
 
 # 第 2 章：全部 Unicode 码点的穷举对拍，几分钟
 test-unicode: $(BUILD)/tok
@@ -63,4 +80,4 @@ unicode-tables: tools/gen_unicode.c
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all test test-unicode test-real test-ops-real test-layer-real unicode-tables clean
+.PHONY: all test test-unicode test-real test-ops-real test-layer-real test-model-real unicode-tables clean

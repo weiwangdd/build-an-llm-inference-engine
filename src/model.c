@@ -65,6 +65,11 @@ static int parse_cfg(model_cfg *c, const jval *root, char *err, size_t cap) {
     if (want_str(root, "model_type", "qwen3_5", 1, err, cap)) return -1;
     const jval *t = json_get(root, "text_config");
     if (!t || t->type != J_OBJ) return fail(err, cap, "config.json 缺少 text_config");
+    /* 输出层复用嵌入表的模型（tie_word_embeddings 为 true）没有单独的 lm_head.weight，我们不支持。
+     * 这个字段在顶层和 text_config 里各有一份，哪一份都不能是 true。 */
+    const jval *tie0 = json_get(root, "tie_word_embeddings"), *tie1 = json_get(t, "tie_word_embeddings");
+    if ((tie0 && tie0->type != J_FALSE) || (tie1 && tie1->type != J_FALSE))
+        return fail(err, cap, "config.json 的 tie_word_embeddings 只支持 false");
 
     if (get_size(t, "vocab_size", &c->vocab, err, cap) || get_size(t, "hidden_size", &c->hidden, err, cap) ||
         get_size(t, "intermediate_size", &c->inter, err, cap) ||
@@ -337,4 +342,80 @@ int layer_forward(float *h, size_t n, const int32_t *pos, const model_cfg *c, co
 done:
     free(x); free(y); free(gt); free(up); free(act);
     return rc;
+}
+
+/* ---------- 第 5 章：整个模型 ---------- */
+
+void model_free(model *m) {
+    if (m->layers)
+        for (size_t i = 0; i < m->cfg.n_layers; i++) layer_free(&m->layers[i]);
+    free(m->layers);
+    free(m->final_norm);
+    m->layers = NULL;
+    m->final_norm = NULL;
+}
+
+int model_load(model *m, const char *config_path, const st_set *s, char *err, size_t cap) {
+    memset(m, 0, sizeof *m);
+    if (model_cfg_load(&m->cfg, config_path, err, cap)) return -1;
+    const model_cfg *c = &m->cfg;
+    if (c->vocab > INT32_MAX) return fail(err, cap, "vocab_size 太大，token id 要能放进 int32");
+    bf16_mat emb;
+    if (get_mat(&emb, s, PREFIX "embed_tokens.weight", c->vocab, c->hidden, err, cap)) return -1;
+    m->embed = emb.data;
+    /* 输出层不在 model.language_model. 下面，是顶层的 lm_head.weight */
+    if (get_mat(&m->lm_head, s, "lm_head.weight", c->vocab, c->hidden, err, cap)) return -1;
+    m->layers = calloc(c->n_layers, sizeof *m->layers);
+    if (!m->layers) return fail(err, cap, "内存不足");
+    for (size_t i = 0; i < c->n_layers; i++)
+        if (layer_load(&m->layers[i], c, s, i, err, cap)) goto bad;
+    if (!(m->final_norm = final_norm_load(c, s, err, cap))) goto bad;
+    return 0;
+bad:
+    model_free(m);
+    return -1;
+}
+
+/* 把第 4 章 layer_forward 报告的步骤名加上 “layers.<i>.” 前缀，再交给调用方 */
+typedef struct { trace_fn f; void *ctx; size_t layer; } prefix_ctx;
+
+static void prefixed(void *p, const char *name, const float *x, size_t rows, size_t cols) {
+    const prefix_ctx *pc = p;
+    char nm[128];
+    snprintf(nm, sizeof nm, "layers.%zu.%s", pc->layer, name);
+    pc->f(pc->ctx, nm, x, rows, cols);
+}
+
+int model_forward(const model *m, const int32_t *ids, size_t n, float *logits,
+                  trace_fn T, void *ctx, char *err, size_t cap) {
+    const model_cfg *c = &m->cfg;
+    size_t H = c->hidden;
+    float *h = malloc(n * H * sizeof *h), *x = malloc(n * H * sizeof *x);
+    int32_t *pos = malloc(n * sizeof *pos);
+    int rc = -1;
+    if (!h || !x || !pos) { fail(err, cap, "内存不足"); goto done; }
+    for (size_t t = 0; t < n; t++) pos[t] = (int32_t)t;
+
+    if (op_embed(h, m->embed, c->vocab, H, ids, n, err, cap)) goto done;
+    tr(T, ctx, "embed", h, n, H);
+    for (size_t i = 0; i < c->n_layers; i++) {        /* 每一层的输出就是下一层的输入 */
+        prefix_ctx pc = {T, ctx, i};
+        if (layer_forward(h, n, pos, c, &m->layers[i], T ? prefixed : NULL, &pc, err, cap)) goto done;
+    }
+    op_rmsnorm(x, h, m->final_norm, n, H, c->eps);    tr(T, ctx, "final_norm", x, n, H);
+    mm(logits, x, &m->lm_head, n);                    tr(T, ctx, "logits", logits, n, c->vocab);
+    rc = 0;
+done:
+    free(h); free(x); free(pos);
+    return rc;
+}
+
+int logits_argmax(const float *row, size_t vocab, int32_t *out, char *err, size_t cap) {
+    size_t best = 0;
+    for (size_t i = 0; i < vocab; i++) {
+        if (isnan(row[i])) return fail(err, cap, "logits 的第 %zu 个元素是 NaN", i);
+        if (row[i] > row[best]) best = i;           /* 严格大于：同样大时保留前面那个 */
+    }
+    *out = (int32_t)best;
+    return 0;
 }
