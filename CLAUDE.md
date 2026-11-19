@@ -27,6 +27,7 @@ make test-ops-real MODEL=<模型目录>   # 第 3 章：拿真实权重当算子
 make test-layer-real MODEL=<模型目录> PYTHON=...   # 第 4 章：真实模型的四层，两层对拍，十几分钟
 make test-model-real MODEL=<模型目录> PYTHON=...   # 第 5 章：整模前向加贪心解码 8 个 token，用 -O2 无 ASan 另建的 build/fast/forward
 make test-gen-real MODEL=<模型目录> PYTHON=...     # 第 6 章：带缓存贪心 8 个 + 对话模板采样，与不带缓存逐位对拍，同样用 build/fast
+python3 tools/gen_architecture.py   # 重新生成 README 里的架构图 book/images/qwen38-architecture.svg（改了结构或新增章节时更新）
 make unicode-tables  # 从 UCD 9.0 和 16.0 重新生成 src/unicode_tables.c（下载地址见 tools/gen_unicode.c）
 tools/ask.sh [-n N] [-s S] [-g] [-t] "问题"   # 向真实模型提问（MODEL 默认 /data/models/Qwen3.8-27B），边生成边打印，用 build/fast 的 -O2 程序
 ```
