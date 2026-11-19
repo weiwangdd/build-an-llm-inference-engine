@@ -8,7 +8,7 @@
 
 ## 一张图看全书
 
-下图是本书实现的 Qwen3.8-27B 从提问到回答的完整路径，颜色表示每一部分由哪一章实现（第 1 到 6 章），图中有图例和术语解释。图由 `tools/gen_architecture.py` 生成。
+下图是本书实现的 Qwen3.8-27B 从提问到回答的完整路径，颜色表示每一部分由哪一章实现（第 1 到 6 章；第 7 章把全部计算搬到 GPU 上），图中有图例和术语解释。图由 `tools/gen_architecture.py` 生成。
 
 ![Qwen3.8-27B 架构图，按实现的章节上色](book/images/qwen38-architecture.svg)
 
@@ -25,6 +25,7 @@
 | [第 4 章](book/04-layer.md) | 单层前向（全注意力、门控 delta 规则的线性注意力、前馈层） | 初稿，已在随机小模型上通过两层对拍：逐步误差不超过 0.5 ulp，与官方 transformers（float64）的相对误差不超过 2.4e-4；在 Qwen3.8-27B 的四层真实权重上同样通过 |
 | [第 5 章](book/05-model.md) | 整模前向（64 层、输出层、logits）与最朴素的贪心解码 | 初稿，已在 8 层随机小模型上通过两层对拍：逐步误差不超过 0.5 ulp，贪心解码的 token 与官方 transformers（float64）完全相同；在 Qwen3.8-27B 上 64 层逐层对拍通过，“中国的首都是”贪心生成的 8 个 token 与官方 float64 完全相同 |
 | [第 6 章](book/06-generate.md) | 生成循环（KV 缓存与线性注意力的状态、温度/top-k/top-p 采样、结束符） | 初稿，已在 8 层随机小模型上通过：带缓存与不带缓存逐字节相同；采样与标准库参考实现逐 token 相同，分布与官方 logits 处理器一致，官方 generate 照同样的选择走时分布一致、停在同一处；在 Qwen3.8-27B 上带缓存与不带缓存逐位相同，按对话模板提问并采样，在 `<|im_end|>` 处停下 |
+| [第 7 章](book/07-gpu.md) | 单卡 GPU 后端（朴素的 CUDA 内核：double 累加、与 CPU 相同的求和次序、关掉 FMA） | 初稿，第 3 到 6 章的全部测试换成 GPU 版后通过；GPU 的输出与 CPU 逐位相同（小模型上每层每一步，Qwen3.8-27B 上 64 层的输出和 logits），27B 每个 token 约 0.8 秒（CPU 13.3 秒） |
 
 ## 构建与测试
 
@@ -49,11 +50,19 @@ make test-gen-real MODEL=<模型目录> PYTHON=$HOME/venvs/tok/bin/python     # 
 
 如果系统的 `python3` 已经装了 `tokenizers`，可以省略 `PYTHON=`。
 
-想自己向模型提问，可以用 `tools/ask.sh`。它套上对话模板，用第 6 章的生成循环边生成边打印（另建一份 `-O2`、不带 ASan 的程序到 `build/fast`）。现在是 CPU 单线程，每个 token 约 13.5 秒，一个问题要好几分钟：
+第 7 章的 GPU 版需要 NVIDIA 显卡和 CUDA 工具包（在 CUDA 13.1、RTX PRO 6000 Blackwell 上验证过）。CUDA 默认在 `/usr/local/cuda`，可以用 `CUDA=` 指定；显卡架构默认 `sm_120`，别的显卡用 `CUDA_ARCH=` 改。没有 CUDA 时前 6 章照常构建和测试。
+
+```
+make gpu                                                   # 构建 GPU 版到 build/gpu，工具和用法与 CPU 版相同
+make test-gpu PYTHON=$HOME/venvs/tok/bin/python            # 第 3 到 6 章的测试换成 GPU 版再跑一遍，再与 CPU 逐层比较，两三分钟
+make test-gpu-real MODEL=<模型目录> PYTHON=$HOME/venvs/tok/bin/python   # 第 7 章：在真实模型上验收 GPU 版，二十分钟左右
+```
+
+想自己向模型提问，可以用 `tools/ask.sh`。它套上对话模板，用第 6 章的生成循环边生成边打印（另建一份 `-O2`、不带 ASan 的程序到 `build/fast`）。CPU 版是单线程，每个 token 约 13.5 秒，一个问题要好几分钟；加 `-G` 在 GPU 上算（第 7 章），每个 token 约 0.8 秒：
 
 ```
 tools/ask.sh "中国的首都是哪里？"                  # 默认用 /data/models/Qwen3.8-27B，可用 MODEL=<模型目录> 指定
-tools/ask.sh -n 200 -s 42 "用三句话解释什么是大模型推理"   # -n 最多生成几个 token，-s 种子，-g 贪心，-t 思考模式
+tools/ask.sh -n 200 -s 42 "用三句话解释什么是大模型推理"   # -n 最多生成几个 token，-s 种子，-g 贪心，-t 思考模式，-G 用 GPU
 ```
 
 ## 许可
