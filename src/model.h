@@ -119,4 +119,22 @@ void model_cache_free(model_cache *kc);
 int  model_step(const model *m, model_cache *kc, const int32_t *ids, size_t n, float *logits,
                 trace_fn trace, void *ctx, char *err, size_t errcap);
 
+/* ---------- 第 8 章：批处理 ----------
+ *
+ * 服务端同时有好几个请求在生成。每个请求有自己的缓存，各自接上几个新 token（预填充时是提示词的一块，
+ * 解码时是上一步选出的一个），一次前向一起算：矩阵乘对全部 token 做一次，权重只读一遍。
+ * 每个序列的 logits 与单独调用 model_step 逐位相同。 */
+
+typedef struct {
+    model_cache *kc;         /* 这个序列的缓存（model_forward 内部用 NULL 表示不用缓存） */
+    const int32_t *ids;      /* 新 token */
+    size_t n;                /* 新 token 的个数，至少 1 */
+} model_seq;
+
+/* 一批 nseq 个序列一起往前算一步。logits 依次是第 0 个序列的 n 行、第 1 个序列的 n 行……共 Σn 行。
+ * 每个缓存只能出现一次。成功后每个缓存的 len 增加各自的 n；检查不通过时什么都不变；
+ * 中途出错时这一批的缓存都标记为损坏。trace 收到的张量是全部 Σn 行。 */
+int  model_step_batch(const model *m, model_seq *seqs, size_t nseq, float *logits,
+                      trace_fn trace, void *ctx, char *err, size_t errcap);
+
 #endif

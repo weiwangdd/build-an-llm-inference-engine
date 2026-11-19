@@ -48,15 +48,18 @@ static void mm(float *y, const float *x, const bf16_mat *w, size_t n) { gop_matm
 
 /* ---------- 前向（与 model.c 对应） ---------- */
 
-static int full_attention(float *out, const float *x, size_t n, const int32_t *pos, size_t past, const model_cfg *c,
-                          const layer_w *w, layer_cache *lc, trace_fn T, void *ctx, char *err, size_t cap) {
-    size_t hd = c->head_dim, nh = c->heads, nkv = c->kv_heads, qd = nh * hd, kd = nkv * hd;
+/* 第 8 章：一批序列，同 model.c */
+static layer_cache *seq_cache(const model_seq *s, size_t layer) { return s->kc ? &s->kc->layers[layer] : NULL; }
+static size_t seq_past(const model_seq *s) { return s->kc ? s->kc->len : 0; }
+
+static int full_attention(float *out, const float *x, size_t N, const int32_t *pos, const model_seq *seqs,
+                          size_t nseq, size_t layer, const model_cfg *c, const layer_w *w,
+                          trace_fn T, void *ctx, char *err, size_t cap) {
+    size_t hd = c->head_dim, nh = c->heads, nkv = c->kv_heads, qd = nh * hd, kd = nkv * hd, n = N;
     float *qg = dmem(n * 2 * qd * sizeof *qg, err, cap), *q = dmem(n * qd * sizeof *q, err, cap);
     float *gate = dmem(n * qd * sizeof *gate, err, cap);
     float *k = dmem(n * kd * sizeof *k, err, cap), *v = dmem(n * kd * sizeof *v, err, cap);
     float *t1 = dmem(n * qd * sizeof *t1, err, cap), *t2 = dmem(n * qd * sizeof *t2, err, cap);
-    float *kall = lc ? lc->k : k, *vall = lc ? lc->v : v;
-    float *knew = kall + past * kd;
     int rc = -1;
     if (!qg || !q || !gate || !k || !v || !t1 || !t2) goto done;
 
@@ -66,12 +69,22 @@ static int full_attention(float *out, const float *x, size_t n, const int32_t *p
     gpu_copy2d(gate, hd, qg + hd, 2 * hd, hd, n * nh);
     mm(k, x, &w->k, n);                      TR("k_proj", k, n, kd);
     mm(v, x, &w->v, n);                      TR("v_proj", v, n, kd);
-    if (lc) gpu_copy(vall + past * kd, v, n * kd * sizeof *v);
     gop_rmsnorm(t1, q, w->q_norm, n * nh, hd, c->eps);         TR("q_norm", t1, n, qd);
     gop_rope(q, t1, pos, n, nh, hd, c->rot, c->theta);         TR("q_rope", q, n, qd);
     gop_rmsnorm(t1, k, w->k_norm, n * nkv, hd, c->eps);        TR("k_norm", t1, n, kd);
-    gop_rope(knew, t1, pos, n, nkv, hd, c->rot, c->theta);     TR("k_rope", knew, n, kd);
-    if (gop_attention_past(t1, q, kall, vall, n, past, nh, nkv, hd, 1.0 / sqrt((double)hd), err, cap)) goto done;
+    gop_rope(k, t1, pos, n, nkv, hd, c->rot, c->theta);        TR("k_rope", k, n, kd);
+    for (size_t b = 0, off = 0; b < nseq; off += seqs[b++].n) {
+        size_t nb = seqs[b].n, past = seq_past(&seqs[b]);
+        layer_cache *lc = seq_cache(&seqs[b], layer);
+        const float *kall = k + off * kd, *vall = v + off * kd;
+        if (lc) {
+            gpu_copy(lc->k + past * kd, k + off * kd, nb * kd * sizeof *k);
+            gpu_copy(lc->v + past * kd, v + off * kd, nb * kd * sizeof *v);
+            kall = lc->k; vall = lc->v;
+        }
+        if (gop_attention_past(t1 + off * qd, q + off * qd, kall, vall, nb, past, nh, nkv, hd,
+                               1.0 / sqrt((double)hd), err, cap)) goto done;
+    }
     TR("attn", t1, n, qd);
     gop_sigmoid(t2, gate, n * qd);                             TR("gate_sigmoid", t2, n, qd);
     gop_mul(q, t1, t2, n * qd);                                TR("gated", q, n, qd);
@@ -82,37 +95,41 @@ done:
     return rc;
 }
 
-static int linear_attention(float *out, const float *x, size_t n, size_t past, const model_cfg *c, const layer_w *w,
-                            layer_cache *lc, trace_fn T, void *ctx, char *err, size_t cap) {
-    size_t hk = c->lk_heads, hv = c->lv_heads, dk = c->lk_dim, dv = c->lv_dim;
-    size_t kd = hk * dk, vd = hv * dv, cd = 2 * kd + vd;
+static int linear_attention(float *out, const float *x, size_t N, const model_seq *seqs, size_t nseq, size_t layer,
+                            const model_cfg *c, const layer_w *w, trace_fn T, void *ctx, char *err, size_t cap) {
+    size_t hk = c->lk_heads, hv = c->lv_heads, dk = c->lk_dim, dv = c->lv_dim, n = N;
+    size_t kd = hk * dk, vd = hv * dv, cd = 2 * kd + vd, kw = c->conv_k - 1;
     float *qkv = dmem(n * cd * sizeof *qkv, err, cap), *cv = dmem(n * cd * sizeof *cv, err, cap);
     float *z = dmem(n * vd * sizeof *z, err, cap), *a = dmem(n * hv * sizeof *a, err, cap);
     float *b = dmem(n * hv * sizeof *b, err, cap);
     float *q = dmem(n * kd * sizeof *q, err, cap), *k = dmem(n * kd * sizeof *k, err, cap);
     float *v = dmem(n * vd * sizeof *v, err, cap);
     float *g = dmem(n * hv * sizeof *g, err, cap), *beta = dmem(n * hv * sizeof *beta, err, cap);
-    float *core = dmem(n * vd * sizeof *core, err, cap), *tmp = NULL;
+    float *core = dmem(n * vd * sizeof *core, err, cap), *tmp = dmem((kw ? kw : 1) * cd * sizeof *tmp, err, cap);
     double *S0 = NULL;                        /* 不用缓存时，门控 delta 规则从全零的状态出发 */
     int rc = -1;
-    if (!qkv || !cv || !z || !a || !b || !q || !k || !v || !g || !beta || !core) goto done;
+    if (!qkv || !cv || !z || !a || !b || !q || !k || !v || !g || !beta || !core || !tmp) goto done;
 
     mm(qkv, x, &w->qkv, n);                  TR("qkv", qkv, n, cd);
     mm(z, x, &w->z, n);                      TR("z", z, n, vd);
     mm(b, x, &w->b, n);                      TR("b", b, n, hv);
     mm(a, x, &w->a, n);                      TR("a", a, n, hv);
-    size_t kw = c->conv_k - 1, nh = lc ? (past < kw ? past : kw) : 0;
-    gop_conv1d_hist(cv, qkv, lc ? lc->conv : NULL, nh, w->conv, n, cd, c->conv_k);
-    TR("conv", cv, n, cd);
-    if (lc) {                                 /* 把“历史 + 新 token”的最后 kw 行留作下一次的历史 */
-        size_t total = nh + n, keep = total < kw ? total : kw;
-        if (!(tmp = dmem(keep * cd * sizeof *tmp, err, cap))) goto done;
-        for (size_t r = 0; r < keep; r++) {
-            size_t src = total - keep + r;
-            gpu_copy(tmp + r * cd, src < nh ? lc->conv + src * cd : qkv + (src - nh) * cd, cd * sizeof *tmp);
+    for (size_t s = 0, off = 0; s < nseq; off += seqs[s++].n) {
+        size_t nb = seqs[s].n, past = seq_past(&seqs[s]);
+        layer_cache *lc = seq_cache(&seqs[s], layer);
+        size_t nh = lc ? (past < kw ? past : kw) : 0;
+        const float *xs = qkv + off * cd;
+        gop_conv1d_hist(cv + off * cd, xs, lc ? lc->conv : NULL, nh, w->conv, nb, cd, c->conv_k);
+        if (lc) {                             /* 把“历史 + 新 token”的最后 kw 行留作下一次的历史 */
+            size_t total = nh + nb, keep = total < kw ? total : kw;
+            for (size_t r = 0; r < keep; r++) {
+                size_t src = total - keep + r;
+                gpu_copy(tmp + r * cd, src < nh ? lc->conv + src * cd : xs + (src - nh) * cd, cd * sizeof *tmp);
+            }
+            gpu_copy(lc->conv, tmp, keep * cd * sizeof *tmp);
         }
-        gpu_copy(lc->conv, tmp, keep * cd * sizeof *tmp);
     }
+    TR("conv", cv, n, cd);
     gop_silu(qkv, cv, n * cd);                                 TR("conv_silu", qkv, n, cd);
     gpu_copy2d(cv, kd, qkv, cd, kd, n);                        /* cv 暂存 q */
     gpu_copy2d(cv + n * kd, kd, qkv + kd, cd, kd, n);          /* 和 k */
@@ -121,11 +138,15 @@ static int linear_attention(float *out, const float *x, size_t n, size_t past, c
     gop_l2norm(k, cv + n * kd, n * hk, dk, 1e-6);              TR("k_l2", k, n, kd);
     gop_sigmoid(beta, b, n * hv);                              TR("beta", beta, n, hv);
     gop_decay(g, a, w->A_log, w->dt_bias, n, hv);              TR("g", g, n, hv);
-    if (!lc) {
-        if (!(S0 = dmem(hv * dk * dv * sizeof *S0, err, cap))) goto done;
-        gpu_zero(S0, hv * dk * dv * sizeof *S0);
+    for (size_t s = 0, off = 0; s < nseq; off += seqs[s++].n) {
+        layer_cache *lc = seq_cache(&seqs[s], layer);
+        if (!lc) {
+            if (!S0 && !(S0 = dmem(hv * dk * dv * sizeof *S0, err, cap))) goto done;
+            gpu_zero(S0, hv * dk * dv * sizeof *S0);
+        }
+        gop_gated_delta_state(core + off * vd, q + off * kd, k + off * kd, v + off * vd, g + off * hv,
+                              beta + off * hv, lc ? lc->S : S0, seqs[s].n, hk, hv, dk, dv);
     }
-    gop_gated_delta_state(core, q, k, v, g, beta, lc ? lc->S : S0, n, hk, hv, dk, dv);
     TR("delta", core, n, vd);
     gop_rmsnorm_gated(v, core, z, w->gnorm, n * hv, dv, c->eps); TR("gnorm", v, n, vd);
     mm(out, v, &w->out, n);
@@ -137,8 +158,8 @@ done:
 }
 
 /* h、pos 都在显存里 */
-static int layer_run(float *h, size_t n, const int32_t *pos, size_t past, const model_cfg *c, const layer_w *w,
-                     layer_cache *lc, trace_fn T, void *ctx, char *err, size_t cap) {
+static int layer_run(float *h, size_t n, const int32_t *pos, const model_seq *seqs, size_t nseq, size_t layer,
+                     const model_cfg *c, const layer_w *w, trace_fn T, void *ctx, char *err, size_t cap) {
     size_t H = c->hidden, I = c->inter;
     float *x = dmem(n * H * sizeof *x, err, cap), *y = dmem(n * H * sizeof *y, err, cap);
     float *gt = dmem(n * I * sizeof *gt, err, cap), *up = dmem(n * I * sizeof *up, err, cap);
@@ -147,8 +168,8 @@ static int layer_run(float *h, size_t n, const int32_t *pos, size_t past, const 
     if (!x || !y || !gt || !up || !act) goto done;
 
     gop_rmsnorm(x, h, w->in_norm, n, H, c->eps);               TR("attn_in", x, n, H);
-    if (w->full ? full_attention(y, x, n, pos, past, c, w, lc, T, ctx, err, cap)
-                : linear_attention(y, x, n, past, c, w, lc, T, ctx, err, cap)) goto done;
+    if (w->full ? full_attention(y, x, n, pos, seqs, nseq, layer, c, w, T, ctx, err, cap)
+                : linear_attention(y, x, n, seqs, nseq, layer, c, w, T, ctx, err, cap)) goto done;
     TR("attn_out", y, n, H);
     gop_add(h, h, y, n * H);                                   TR("resid", h, n, H);
 
@@ -176,22 +197,25 @@ static void prefixed(void *p, const char *name, const float *x, size_t rows, siz
     pc->f(pc->ctx, nm, x, rows, cols);
 }
 
-int gpu_model_run(const model *g, model_cache *kc, const int32_t *ids, size_t n, float *logits,
+int gpu_model_run(const model *g, const model_seq *seqs, size_t nseq, float *logits,
                   trace_fn T, void *ctx, char *err, size_t cap) {
     const model_cfg *c = &g->cfg;
-    size_t H = c->hidden, past = kc ? kc->len : 0;
+    size_t H = c->hidden, n = 0;
+    for (size_t b = 0; b < nseq; b++) n += seqs[b].n;
     float *h = NULL, *x = NULL, *dlogits = NULL;
-    int32_t *pos = malloc(n * sizeof *pos), *dids = NULL, *dpos = NULL;
+    int32_t *pos = malloc(n * sizeof *pos), *ids = malloc(n * sizeof *ids), *dids = NULL, *dpos = NULL;
     int rc = -1;
-    if (!pos) { fail(err, cap, "内存不足"); goto done; }
-    for (size_t t = 0; t < n; t++) {
-        /* 内核里没法报错，所以 id 在这里先查一遍（与 op_embed 的检查相同） */
-        if (ids[t] < 0 || (uint64_t)ids[t] >= c->vocab) {
-            fail(err, cap, "第 %zu 个 token id %d 超出嵌入表范围 [0, %zu)", t, ids[t], c->vocab);
-            goto done;
+    if (!pos || !ids) { fail(err, cap, "内存不足"); goto done; }
+    for (size_t b = 0, r = 0; b < nseq; b++)
+        for (size_t t = 0; t < seqs[b].n; t++, r++) {
+            ids[r] = seqs[b].ids[t];
+            /* 内核里没法报错，所以 id 在这里先查一遍（与 op_embed 的检查相同） */
+            if (ids[r] < 0 || (uint64_t)ids[r] >= c->vocab) {
+                fail(err, cap, "第 %zu 个 token id %d 超出嵌入表范围 [0, %zu)", r, ids[r], c->vocab);
+                goto done;
+            }
+            pos[r] = (int32_t)(seq_past(&seqs[b]) + t);
         }
-        pos[t] = (int32_t)(past + t);
-    }
     if (!(h = dmem(n * H * sizeof *h, err, cap)) || !(x = dmem(n * H * sizeof *x, err, cap)) ||
         !(dlogits = dmem(n * c->vocab * sizeof *dlogits, err, cap)) || !(dids = dmem(n * sizeof *dids, err, cap)) ||
         !(dpos = dmem(n * sizeof *dpos, err, cap)))
@@ -202,8 +226,7 @@ int gpu_model_run(const model *g, model_cache *kc, const int32_t *ids, size_t n,
     TR("embed", h, n, H);
     for (size_t i = 0; i < c->n_layers; i++) {
         prefix_ctx pc = {T, ctx, i};
-        if (layer_run(h, n, dpos, past, c, &g->layers[i], kc ? &kc->layers[i] : NULL,
-                      T ? prefixed : NULL, &pc, err, cap)) goto done;
+        if (layer_run(h, n, dpos, seqs, nseq, i, c, &g->layers[i], T ? prefixed : NULL, &pc, err, cap)) goto done;
     }
     gop_rmsnorm(x, h, g->final_norm, n, H, c->eps);   TR("final_norm", x, n, H);
     mm(dlogits, x, &g->lm_head, n);
@@ -212,7 +235,7 @@ int gpu_model_run(const model *g, model_cache *kc, const int32_t *ids, size_t n,
     rc = 0;
 done:
     gpu_free(h); gpu_free(x); gpu_free(dlogits); gpu_free(dids); gpu_free(dpos);
-    free(pos);
+    free(pos); free(ids);
     return rc;
 }
 
@@ -331,13 +354,14 @@ int gpu_layer_forward(float *h, size_t n, const int32_t *pos, const model_cfg *c
                       trace_fn T, void *ctx, char *err, size_t cap) {
     if (gpu_init(err, cap)) return -1;
     layer_w d;
+    model_seq one = {NULL, NULL, n};
     if (layer_upload(&d, c, w, err, cap)) return -1;
     size_t bytes = n * c->hidden * sizeof *h;
     float *dh = dmem(bytes, err, cap);
     int32_t *dpos = dmem(n * sizeof *dpos, err, cap);
     int rc = -1;
     if (dh && dpos && !gpu_put(dh, h, bytes, err, cap) && !gpu_put(dpos, pos, n * sizeof *pos, err, cap) &&
-        !layer_run(dh, n, dpos, 0, c, &d, NULL, T, ctx, err, cap))
+        !layer_run(dh, n, dpos, &one, 1, 0, c, &d, T, ctx, err, cap))
         rc = gpu_get(h, dh, bytes, err, cap);
     gpu_free(dh); gpu_free(dpos);
     layer_gpu_free(&d);

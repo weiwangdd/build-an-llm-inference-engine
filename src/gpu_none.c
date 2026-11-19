@@ -17,9 +17,9 @@ int gpu_layer_forward(float *h, size_t n, const int32_t *pos, const model_cfg *c
     return no_cuda(err, cap);
 }
 
-int gpu_model_run(const model *g, model_cache *kc, const int32_t *ids, size_t n, float *logits,
+int gpu_model_run(const model *g, const model_seq *seqs, size_t nseq, float *logits,
                   trace_fn trace, void *ctx, char *err, size_t cap) {
-    (void)g; (void)kc; (void)ids; (void)n; (void)logits; (void)trace; (void)ctx;
+    (void)g; (void)seqs; (void)nseq; (void)logits; (void)trace; (void)ctx;
     return no_cuda(err, cap);
 }
 

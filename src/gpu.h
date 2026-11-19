@@ -24,8 +24,9 @@ int  gpu_layer_forward(float *h, size_t n, const int32_t *pos, const model_cfg *
 
 /* ---- 下面几个由 model.c 调用 ---- */
 
-/* g 是 model_to_gpu 建的显存里的模型。ids、logits 在内存里。kc 为 NULL 时不用缓存。 */
-int  gpu_model_run(const model *g, model_cache *kc, const int32_t *ids, size_t n, float *logits,
+/* g 是 model_to_gpu 建的显存里的模型。ids、logits 在内存里。seqs 是一批序列（第 8 章），
+ * 只有一个序列且它的 kc 为 NULL 时不用缓存。 */
+int  gpu_model_run(const model *g, const model_seq *seqs, size_t nseq, float *logits,
                    trace_fn trace, void *ctx, char *err, size_t errcap);
 void gpu_model_free(model *g);
 /* 在显存里分配 kc 每一层的缓存（kc->n_layers、kc->cap 已经填好）。 */
