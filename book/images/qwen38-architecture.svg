@@ -1,0 +1,277 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1520" height="2000" viewBox="0 0 1520 2000" font-family="PingFang SC, Hiragino Sans GB, Noto Sans CJK SC, Source Han Sans SC, Microsoft YaHei, WenQuanYi Zen Hei, sans-serif">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="context-stroke"/></marker></defs>
+<rect width="1520" height="2000" fill="#FFFFFF"/>
+<text x="760.0" y="40" font-size="26" text-anchor="middle" font-weight="bold" fill="#222">Qwen3.8-27B 推理的完整路径：从提问到回答</text>
+<text x="760.0" y="68" font-size="15" text-anchor="middle" font-weight="normal" fill="#555">颜色表示由哪一章实现；方括号里是每个 token 的张量形状；n 是 token 个数</text>
+<rect x="370" y="96" width="200" height="70" rx="8" fill="#FFFFFF" stroke="#3E8E3E" stroke-width="1.6"/>
+<text x="470.0" y="126.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">提问（文本）</text>
+<text x="470.0" y="146.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">用户的一段话</text>
+<rect x="610" y="96" width="230" height="70" rx="8" fill="#DDF1D6" stroke="#3E8E3E" stroke-width="1.6"/>
+<text x="725.0" y="126.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">对话模板</text>
+<text x="725.0" y="146.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">套上 &lt;|im_start|&gt; 等标记</text>
+<rect x="880" y="96" width="330" height="70" rx="8" fill="#DDF1D6" stroke="#3E8E3E" stroke-width="1.6"/>
+<text x="1045.0" y="126.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">分词器</text>
+<text x="1045.0" y="146.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">切出特殊 token → NFC → 预分词 → BPE</text>
+<rect x="1250" y="96" width="210" height="70" rx="8" fill="#DDF1D6" stroke="#3E8E3E" stroke-width="1.6"/>
+<text x="1355.0" y="126.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">token id 序列</text>
+<text x="1355.0" y="146.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">n 个整数，词表 248320</text>
+<path d="M570,131 L608,131" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M840,131 L878,131" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M1210,131 L1248,131" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="360" y="196" width="1130" height="1270" rx="14" fill="#E7DDF6" fill-opacity="0.3" stroke="#6B47A6" stroke-width="2.2"/>
+<text x="376" y="222" font-size="17" text-anchor="start" font-weight="bold" fill="#6B47A6">整个模型（一次前向）</text>
+<path d="M1355,166 L1355,230 L925,230 L925,248" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="700" y="250" width="450" height="58" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="925.0" y="274.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">嵌入：按 id 查表</text>
+<text x="925.0" y="294.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">embed_tokens [248320, 5120] → h [n, 5120]</text>
+<path d="M925,308 L925,340" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="380" y="342" width="1090" height="872" rx="14" fill="#FBDCCB" fill-opacity="0.3" stroke="#C55A22" stroke-width="2.2"/>
+<text x="396" y="368" font-size="17" text-anchor="start" font-weight="bold" fill="#C55A22">一个解码层（共 64 层：16 组 × [3 个线性注意力层 + 1 个全注意力层]）</text>
+<rect x="410" y="400" width="210" height="40" rx="8" fill="#FFFFFF" stroke="#C55A22" stroke-width="1.6"/>
+<text x="515.0" y="425.25" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">输入 h [n, 5120]</text>
+<path d="M515.0,440 L515.0,470" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="410" y="472" width="210" height="52" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="515.0" y="493.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">RMSNorm</text>
+<text x="515.0" y="513.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">input_layernorm，1+w 形式</text>
+<path d="M515.0,524 L515.0,556" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="410" y="558" width="210" height="92" rx="8" fill="#FBDCCB" stroke="#C55A22" stroke-width="1.6"/>
+<text x="515.0" y="589.0" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">token 混合器</text>
+<text x="515.0" y="609.25" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">按层的类型二选一：</text>
+<text x="515.0" y="629.5" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">线性注意力 或 全注意力</text>
+<path d="M620,604 L640,604 L640,381 L1259,381 L1259,390" fill="none" stroke="#C55A22" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M852,381 L852,390" fill="none" stroke="#C55A22" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="1056" y="376" font-size="14" text-anchor="middle" font-weight="normal" fill="#C55A22">或</text>
+<path d="M515.0,650 L515.0,690" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<circle cx="515.0" cy="704" r="13" fill="#FBDCCB" stroke="#C55A22" stroke-width="1.6"/>
+<text x="515.0" y="710" font-size="18" text-anchor="middle" font-weight="bold" fill="#C55A22">+</text>
+<path d="M410,420 L396,420 L396,704 L501.0,704" fill="none" stroke="#888" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="535.0" y="700" font-size="13" text-anchor="start" font-weight="normal" fill="#C55A22">残差相加</text>
+<path d="M515.0,717 L515.0,750" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="410" y="752" width="210" height="52" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="515.0" y="773.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">RMSNorm</text>
+<text x="515.0" y="793.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">post_attention_layernorm</text>
+<path d="M515.0,804 L515.0,830" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="410" y="832" width="100" height="50" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="460.0" y="852.4499999999999" font-size="14" text-anchor="middle" font-weight="bold" fill="#1a1a1a">gate_proj</text>
+<text x="460.0" y="871.3499999999999" font-size="12" text-anchor="middle" font-weight="normal" fill="#444">→ 17408</text>
+<rect x="520" y="832" width="100" height="50" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="570.0" y="852.4499999999999" font-size="14" text-anchor="middle" font-weight="bold" fill="#1a1a1a">up_proj</text>
+<text x="570.0" y="871.3499999999999" font-size="12" text-anchor="middle" font-weight="normal" fill="#444">→ 17408</text>
+<rect x="410" y="898" width="100" height="36" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="460.0" y="920.9" font-size="14" text-anchor="middle" font-weight="bold" fill="#1a1a1a">silu</text>
+<path d="M460,882 L460,896" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<circle cx="515.0" cy="964" r="13" fill="#FBDCCB" stroke="#C55A22" stroke-width="1.6"/>
+<text x="515.0" y="970" font-size="18" text-anchor="middle" font-weight="bold" fill="#C55A22">×</text>
+<path d="M460,934 L460,964 L501.0,964" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M570,882 L570,964 L529.0,964" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M515.0,977 L515.0,1002" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="410" y="1004" width="210" height="50" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="515.0" y="1024.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">down_proj</text>
+<text x="515.0" y="1044.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">17408 → 5120</text>
+<text x="507.0" y="824" font-size="13" text-anchor="end" font-weight="normal" fill="#C55A22">前馈层 SwiGLU</text>
+<path d="M515.0,1054 L515.0,1082" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<circle cx="515.0" cy="1096" r="13" fill="#FBDCCB" stroke="#C55A22" stroke-width="1.6"/>
+<text x="515.0" y="1102" font-size="18" text-anchor="middle" font-weight="bold" fill="#C55A22">+</text>
+<path d="M410,730 L396,730 L396,1096 L501.0,1096" fill="none" stroke="#888" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="535.0" y="1092" font-size="13" text-anchor="start" font-weight="normal" fill="#C55A22">残差相加</text>
+<path d="M515.0,1109 L515.0,1134" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="410" y="1136" width="210" height="54" rx="8" fill="#FFFFFF" stroke="#C55A22" stroke-width="1.6"/>
+<text x="515.0" y="1158.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">输出 h [n, 5120]</text>
+<text x="515.0" y="1178.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">即下一层的输入（共 64 层）</text>
+<rect x="655" y="392" width="395" height="535" rx="10" fill="#FFFFFF" fill-opacity="0.7" stroke="#C55A22" stroke-width="1.6"/>
+<text x="852.5" y="416" font-size="16" text-anchor="middle" font-weight="bold" fill="#C55A22">线性注意力层（Gated DeltaNet，48 层）</text>
+<rect x="670" y="432" width="175" height="46" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="757.5" y="450.45" font-size="14" text-anchor="middle" font-weight="bold" fill="#1a1a1a">in_proj_qkv</text>
+<text x="757.5" y="469.34999999999997" font-size="12" text-anchor="middle" font-weight="normal" fill="#444">→ 10240</text>
+<rect x="855" y="432" width="85" height="46" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="897.5" y="450.77500000000003" font-size="13" text-anchor="middle" font-weight="bold" fill="#1a1a1a">in_proj_z</text>
+<text x="897.5" y="468.32500000000005" font-size="11" text-anchor="middle" font-weight="normal" fill="#444">→ 6144</text>
+<rect x="948" y="432" width="87" height="46" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="991.5" y="450.77500000000003" font-size="13" text-anchor="middle" font-weight="bold" fill="#1a1a1a">in_proj_a/b</text>
+<text x="991.5" y="468.32500000000005" font-size="11" text-anchor="middle" font-weight="normal" fill="#444">→ 48 各</text>
+<path d="M757,478 L757,492" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="670" y="492" width="175" height="46" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="757.5" y="510.45" font-size="14" text-anchor="middle" font-weight="bold" fill="#1a1a1a">因果卷积 k=4 + silu</text>
+<text x="757.5" y="529.35" font-size="12" text-anchor="middle" font-weight="normal" fill="#444">逐通道</text>
+<path d="M757,538 L757,552" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="670" y="552" width="175" height="46" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="757.5" y="570.775" font-size="13" text-anchor="middle" font-weight="bold" fill="#1a1a1a">切开 q、k、v，L2 归一化</text>
+<text x="757.5" y="588.3249999999999" font-size="11" text-anchor="middle" font-weight="normal" fill="#444">q,k 16 头×128；v 48 头×128</text>
+<rect x="855" y="492" width="180" height="106" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="945.0" y="523.2249999999999" font-size="13" text-anchor="middle" font-weight="bold" fill="#1a1a1a">β = sigmoid(b)</text>
+<text x="945.0" y="540.7749999999999" font-size="11" text-anchor="middle" font-weight="normal" fill="#444">g = −e^A_log ·</text>
+<text x="945.0" y="558.3249999999999" font-size="11" text-anchor="middle" font-weight="normal" fill="#444">softplus(a + dt_bias)</text>
+<text x="945.0" y="575.8749999999999" font-size="11" text-anchor="middle" font-weight="normal" fill="#444">（衰减的对数）</text>
+<path d="M990,478 L990,490" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M757,598 L757,612" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M945,598 L945,632 L1035,632" fill="none" stroke="#555" stroke-width="1.6"/>
+<rect x="670" y="612" width="365" height="58" rx="8" fill="#FBDCCB" stroke="#C55A22" stroke-width="1.6"/>
+<text x="852.5" y="636.4499999999999" font-size="14" text-anchor="middle" font-weight="bold" fill="#1a1a1a">门控 delta 规则</text>
+<text x="852.5" y="655.3499999999999" font-size="12" text-anchor="middle" font-weight="normal" fill="#444">S ← e^g·S；S ← S + β·k(v − Sᵀk)ᵀ；y = Sᵀq/√128</text>
+<path d="M852.5,670 L852.5,684" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="670" y="684" width="365" height="46" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="852.5" y="702.4499999999999" font-size="14" text-anchor="middle" font-weight="bold" fill="#1a1a1a">门控 RMSNorm（w 形式）× silu(z)</text>
+<text x="852.5" y="721.3499999999999" font-size="12" text-anchor="middle" font-weight="normal" fill="#444">每个值头 128 维</text>
+<path d="M852.5,730 L852.5,744" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="670" y="744" width="365" height="40" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="852.5" y="768.9" font-size="14" text-anchor="middle" font-weight="bold" fill="#1a1a1a">out_proj  6144 → 5120</text>
+<rect x="670" y="798" width="365" height="80" rx="8" fill="#D3EFEE" stroke="#1C8584" stroke-width="1.6" stroke-dasharray="6 4"/>
+<text x="852.5" y="824.0" font-size="14" text-anchor="middle" font-weight="bold" fill="#1a1a1a">缓存（每层）</text>
+<text x="852.5" y="842.9" font-size="12" text-anchor="middle" font-weight="normal" fill="#444">卷积窗口：最近 3 个 token 的 qkv</text>
+<text x="852.5" y="861.8" font-size="12" text-anchor="middle" font-weight="normal" fill="#444">状态矩阵 S：48 × 128 × 128，double</text>
+<path d="M710,798 L710,628" fill="none" stroke="#1C8584" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#ah)"/>
+<rect x="1062" y="392" width="395" height="535" rx="10" fill="#FFFFFF" fill-opacity="0.7" stroke="#C55A22" stroke-width="1.6"/>
+<text x="1259.5" y="416" font-size="16" text-anchor="middle" font-weight="bold" fill="#C55A22">全注意力层（每 4 层 1 个，16 层）</text>
+<rect x="1077" y="432" width="175" height="46" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="1164.5" y="451.09999999999997" font-size="12" text-anchor="middle" font-weight="bold" fill="#1a1a1a">q_proj</text>
+<text x="1164.5" y="467.29999999999995" font-size="10" text-anchor="middle" font-weight="normal" fill="#444">→ 24 头 × (256 q + 256 门控)</text>
+<rect x="1262" y="432" width="180" height="46" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="1352.0" y="450.77500000000003" font-size="13" text-anchor="middle" font-weight="bold" fill="#1a1a1a">k_proj、v_proj</text>
+<text x="1352.0" y="468.32500000000005" font-size="11" text-anchor="middle" font-weight="normal" fill="#444">→ 4 组 × 256</text>
+<path d="M1164,478 L1164,492" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M1352,478 L1352,492" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="1077" y="492" width="175" height="46" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="1164.5" y="510.77500000000003" font-size="13" text-anchor="middle" font-weight="bold" fill="#1a1a1a">q_norm（RMSNorm）</text>
+<text x="1164.5" y="528.325" font-size="11" text-anchor="middle" font-weight="normal" fill="#444">按头，256 维</text>
+<rect x="1262" y="492" width="180" height="46" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="1352.0" y="510.77500000000003" font-size="13" text-anchor="middle" font-weight="bold" fill="#1a1a1a">k_norm（RMSNorm）</text>
+<text x="1352.0" y="528.325" font-size="11" text-anchor="middle" font-weight="normal" fill="#444">按头，256 维</text>
+<path d="M1164,538 L1164,552" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M1352,538 L1352,552" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="1077" y="552" width="365" height="46" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="1259.5" y="570.4499999999999" font-size="14" text-anchor="middle" font-weight="bold" fill="#1a1a1a">RoPE 旋转位置编码</text>
+<text x="1259.5" y="589.3499999999999" font-size="12" text-anchor="middle" font-weight="normal" fill="#444">每头只转前 64 维，θ = 10⁷</text>
+<path d="M1259.5,598 L1259.5,612" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="1077" y="612" width="365" height="58" rx="8" fill="#FBDCCB" stroke="#C55A22" stroke-width="1.6"/>
+<text x="1259.5" y="636.4499999999999" font-size="14" text-anchor="middle" font-weight="bold" fill="#1a1a1a">因果注意力（分组查询）</text>
+<text x="1259.5" y="655.3499999999999" font-size="12" text-anchor="middle" font-weight="normal" fill="#444">softmax(q·kᵀ/√256)·v，查询头 h 用第 h/6 组键值</text>
+<path d="M1259.5,670 L1259.5,684" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="1077" y="684" width="365" height="46" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="1259.5" y="702.4499999999999" font-size="14" text-anchor="middle" font-weight="bold" fill="#1a1a1a">× sigmoid(门控)</text>
+<text x="1259.5" y="721.3499999999999" font-size="12" text-anchor="middle" font-weight="normal" fill="#444">输出门控，逐元素</text>
+<path d="M1259.5,730 L1259.5,744" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="1077" y="744" width="365" height="40" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="1259.5" y="768.9" font-size="14" text-anchor="middle" font-weight="bold" fill="#1a1a1a">o_proj  6144 → 5120</text>
+<rect x="1077" y="798" width="365" height="80" rx="8" fill="#D3EFEE" stroke="#1C8584" stroke-width="1.6" stroke-dasharray="6 4"/>
+<text x="1259.5" y="824.0" font-size="14" text-anchor="middle" font-weight="bold" fill="#1a1a1a">KV 缓存（每层）</text>
+<text x="1259.5" y="842.9" font-size="12" text-anchor="middle" font-weight="normal" fill="#444">过去每个 token 的 k（RoPE 之后）和 v</text>
+<text x="1259.5" y="861.8" font-size="12" text-anchor="middle" font-weight="normal" fill="#444">每个 token 2 × 4 × 256 个数</text>
+<path d="M1402,798 L1402,628" fill="none" stroke="#1C8584" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#ah)"/>
+<path d="M852.5,927 L852.5,942" fill="none" stroke="#C55A22" stroke-width="1.6"/>
+<path d="M1259.5,927 L1259.5,942" fill="none" stroke="#C55A22" stroke-width="1.6"/>
+<path d="M1259.5,942 L628,942 L628,704 L529.0,704" fill="none" stroke="#C55A22" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="1056" y="960" font-size="13" text-anchor="middle" font-weight="normal" fill="#C55A22">token 混合器的输出 [n, 5120]，加回残差</text>
+<rect x="655" y="985" width="800" height="210" rx="10" fill="#FFFFFF" stroke="#999" stroke-width="1.2"/>
+<text x="669" y="1009" font-size="15" text-anchor="start" font-weight="bold" fill="#333">术语</text>
+<text x="669" y="1033" font-size="13" text-anchor="start" font-weight="bold" fill="#333">残差</text>
+<text x="785" y="1033" font-size="13" text-anchor="start" font-weight="normal" fill="#444">把一步的输出加回它的输入，信息可以绕过这一步直接往后传。</text>
+<text x="669" y="1054" font-size="13" text-anchor="start" font-weight="bold" fill="#333">RMSNorm</text>
+<text x="785" y="1054" font-size="13" text-anchor="start" font-weight="normal" fill="#444">向量除以自己的均方根，再逐元素乘权重；“1+w 形式”乘的是 1+w。</text>
+<text x="669" y="1075" font-size="13" text-anchor="start" font-weight="bold" fill="#333">RoPE</text>
+<text x="785" y="1075" font-size="13" text-anchor="start" font-weight="normal" fill="#444">按 token 的位置把 q、k 的成对分量转一个角度，注意力由此知道先后。</text>
+<text x="669" y="1096" font-size="13" text-anchor="start" font-weight="bold" fill="#333">分组查询注意力</text>
+<text x="785" y="1096" font-size="13" text-anchor="start" font-weight="normal" fill="#444">几个查询头共用一组键和值（这里 6 个共用 1 组），缓存小 6 倍。</text>
+<text x="669" y="1117" font-size="13" text-anchor="start" font-weight="bold" fill="#333">门控 delta 规则</text>
+<text x="785" y="1117" font-size="13" text-anchor="start" font-weight="normal" fill="#444">线性注意力的核心：每个头一个固定大小的状态矩阵 S，每个 token 先让旧记忆衰减，</text>
+<text x="785" y="1138" font-size="13" text-anchor="start" font-weight="normal" fill="#444">再把“预测误差”写进去；不保留每个 token 的 k、v，所以缓存大小不随长度增长。</text>
+<text x="669" y="1159" font-size="13" text-anchor="start" font-weight="bold" fill="#333">SwiGLU</text>
+<text x="785" y="1159" font-size="13" text-anchor="start" font-weight="normal" fill="#444">前馈层的写法：silu(gate(x)) 与 up(x) 逐元素相乘，再由 down 投影回 5120 维。</text>
+<text x="669" y="1180" font-size="13" text-anchor="start" font-weight="bold" fill="#333">logits</text>
+<text x="785" y="1180" font-size="13" text-anchor="start" font-weight="normal" fill="#444">词表里每个 token 的分数，softmax 之后就是下一个 token 的概率。</text>
+<path d="M925,1214 L925,1240" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="700" y="1242" width="450" height="52" rx="8" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="925.0" y="1263.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">最终 RMSNorm</text>
+<text x="925.0" y="1283.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">norm.weight，1+w 形式</text>
+<path d="M925,1294 L925,1322" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="700" y="1324" width="450" height="52" rx="8" fill="#E7DDF6" stroke="#6B47A6" stroke-width="1.6"/>
+<text x="925.0" y="1345.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">输出层 lm_head</text>
+<text x="925.0" y="1365.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">lm_head.weight [248320, 5120]（不与嵌入表共用）</text>
+<path d="M925,1376 L925,1404" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="700" y="1406" width="450" height="46" rx="8" fill="#FFFFFF" stroke="#6B47A6" stroke-width="1.6"/>
+<text x="925.0" y="1424.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">logits [n, 248320]</text>
+<text x="925.0" y="1444.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">词表里每个 token 一个分数，只用最后一行</text>
+<rect x="20" y="196" width="315" height="150" rx="8" fill="#DCE8F7" stroke="#3D6FAE" stroke-width="1.6"/>
+<text x="177.5" y="233.4" font-size="16" text-anchor="middle" font-weight="bold" fill="#1a1a1a">权重文件</text>
+<text x="177.5" y="255.0" font-size="14" text-anchor="middle" font-weight="normal" fill="#444">18 个 safetensors 分片，55.6 GB</text>
+<text x="177.5" y="276.6" font-size="14" text-anchor="middle" font-weight="normal" fill="#444">mmap 只读映射，合并成一张表</text>
+<text x="177.5" y="298.20000000000005" font-size="14" text-anchor="middle" font-weight="normal" fill="#444">按名字取 BF16 张量</text>
+<text x="177.5" y="319.8" font-size="14" text-anchor="middle" font-weight="normal" fill="#444">1199 个张量</text>
+<path d="M335,260 L698,279" fill="none" stroke="#3D6FAE" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#ah)"/>
+<path d="M335,300 L378,470" fill="none" stroke="#3D6FAE" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#ah)"/>
+<path d="M335,320 L345,330 L345,1350 L698,1350" fill="none" stroke="#3D6FAE" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#ah)"/>
+<text x="345" y="1420" font-size="12" text-anchor="middle" font-weight="normal" fill="#555"></text>
+<text x="178" y="370" font-size="13" text-anchor="middle" font-weight="normal" fill="#3D6FAE">虚线：权重从这里来</text>
+<text x="178" y="388" font-size="13" text-anchor="middle" font-weight="normal" fill="#3D6FAE">（所有矩阵都按 BF16 原样读取）</text>
+<rect x="20" y="420" width="315" height="150" rx="8" fill="#FBDCCB" stroke="#C55A22" stroke-width="1.6"/>
+<text x="177.5" y="459.75" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">配置 config.json</text>
+<text x="177.5" y="480.0" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">hidden 5120，64 层</text>
+<text x="177.5" y="500.25" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">全注意力 24 个查询头、4 组键值</text>
+<text x="177.5" y="520.5" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">线性注意力 16 个键头、48 个值头</text>
+<text x="177.5" y="540.75" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">前馈中间维 17408</text>
+<text x="178" y="594" font-size="13" text-anchor="middle" font-weight="normal" fill="#C55A22">第 3 章讲解各字段，第 4 章读入并检查</text>
+<text x="178" y="612" font-size="13" text-anchor="middle" font-weight="normal" fill="#C55A22">（只接受 Qwen3.8 这一种配置）</text>
+<rect x="20" y="1510" width="1470" height="250" rx="14" fill="#D3EFEE" fill-opacity="0.35" stroke="#1C8584" stroke-width="2.2"/>
+<text x="250" y="1536" font-size="17" text-anchor="start" font-weight="bold" fill="#1C8584">生成循环：每次取一个 token，接到后面再算</text>
+<rect x="45" y="1570" width="175" height="70" rx="8" fill="#D3EFEE" stroke="#1C8584" stroke-width="1.6"/>
+<text x="132.5" y="1600.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">温度</text>
+<text x="132.5" y="1620.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">logits ÷ T（默认 1.0）</text>
+<rect x="250" y="1570" width="190" height="70" rx="8" fill="#D3EFEE" stroke="#1C8584" stroke-width="1.6"/>
+<text x="345.0" y="1600.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">top-k</text>
+<text x="345.0" y="1620.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">只留分数前 k 名（默认 20）</text>
+<rect x="470" y="1570" width="190" height="70" rx="8" fill="#D3EFEE" stroke="#1C8584" stroke-width="1.6"/>
+<text x="565.0" y="1600.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">top-p</text>
+<text x="565.0" y="1620.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">累计概率到 p 为止（默认 0.95）</text>
+<rect x="690" y="1570" width="200" height="70" rx="8" fill="#D3EFEE" stroke="#1C8584" stroke-width="1.6"/>
+<text x="790.0" y="1600.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">softmax 重新归一</text>
+<text x="790.0" y="1620.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">得到保留 token 的概率</text>
+<rect x="920" y="1570" width="230" height="70" rx="8" fill="#D3EFEE" stroke="#1C8584" stroke-width="1.6"/>
+<text x="1035.0" y="1600.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">逆变换采样</text>
+<text x="1035.0" y="1620.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">随机数 splitmix64，可复现</text>
+<rect x="1180" y="1570" width="280" height="70" rx="8" fill="#D3EFEE" stroke="#1C8584" stroke-width="1.6"/>
+<text x="1320.0" y="1600.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">是结束符吗？</text>
+<text x="1320.0" y="1620.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">&lt;|im_end|&gt; 或 &lt;|endoftext|&gt;，或已满 max_new</text>
+<path d="M220,1605 L248,1605" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M440,1605 L468,1605" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M660,1605 L688,1605" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M890,1605 L918,1605" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M1150,1605 L1178,1605" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M925,1452 L925,1488 L132,1488 L132,1568" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="140" y="1480" font-size="13" text-anchor="start" font-weight="normal" fill="#555">最后一行 logits</text>
+<rect x="45" y="1670" width="395" height="60" rx="8" fill="#E7DDF6" stroke="#6B47A6" stroke-width="1.6"/>
+<text x="242.5" y="1695.45" font-size="14" text-anchor="middle" font-weight="bold" fill="#1a1a1a">贪心解码（argmax）</text>
+<text x="242.5" y="1714.3500000000001" font-size="12" text-anchor="middle" font-weight="normal" fill="#444">不采样，直接取分数最大的 token（同分取 id 小的）</text>
+<text x="452" y="1696" font-size="13" text-anchor="start" font-weight="normal" fill="#6B47A6">← 第 5 章先做的最朴素版本：没有缓存，</text>
+<text x="452" y="1716" font-size="13" text-anchor="start" font-weight="normal" fill="#6B47A6">    每一步都从头算全部 token；第 6 章用它当标准答案</text>
+<path d="M1380,1640 L1380,1676" fill="none" stroke="#1C8584" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="1388" y="1662" font-size="14" text-anchor="start" font-weight="normal" fill="#1C8584">否</text>
+<rect x="1250" y="1678" width="210" height="50" rx="8" fill="#D3EFEE" stroke="#1C8584" stroke-width="1.6"/>
+<text x="1355.0" y="1698.45" font-size="14" text-anchor="middle" font-weight="bold" fill="#1a1a1a">新 token 接在后面</text>
+<text x="1355.0" y="1717.3500000000001" font-size="12" text-anchor="middle" font-weight="normal" fill="#444">只算这 1 个，其余靠缓存</text>
+<path d="M1460,1703 L1505,1703 L1505,279 L1152,279" fill="none" stroke="#1C8584" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="1500" y="240" font-size="13" text-anchor="end" font-weight="normal" fill="#1C8584">下一步的输入</text>
+<text x="1495" y="900" font-size="12" text-anchor="middle" font-weight="normal" fill="#555"></text>
+<rect x="370" y="1792" width="300" height="70" rx="8" fill="#DDF1D6" stroke="#3E8E3E" stroke-width="1.6"/>
+<text x="520.0" y="1822.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">解码</text>
+<text x="520.0" y="1842.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">token id → 字节 → UTF-8 文本</text>
+<rect x="710" y="1792" width="260" height="70" rx="8" fill="#FFFFFF" stroke="#3E8E3E" stroke-width="1.6"/>
+<text x="840.0" y="1822.125" font-size="15" text-anchor="middle" font-weight="bold" fill="#1a1a1a">回答（文本）</text>
+<text x="840.0" y="1842.375" font-size="13" text-anchor="middle" font-weight="normal" fill="#444">边生成边打印</text>
+<path d="M1215,1640 L1215,1778 L520,1778 L520,1790" fill="none" stroke="#1C8584" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="1223" y="1665" font-size="14" text-anchor="start" font-weight="normal" fill="#1C8584">是：停止</text>
+<path d="M670,1827 L708,1827" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="1000" y="1832" font-size="13" text-anchor="start" font-weight="normal" fill="#555">每生成一个 token 就打印一次（流式输出）</text>
+<text x="20" y="1897" font-size="17" text-anchor="start" font-weight="bold" fill="#222">图例</text>
+<rect x="70" y="1882" width="26" height="18" rx="4" fill="#DCE8F7" stroke="#3D6FAE" stroke-width="1.6"/>
+<text x="106" y="1897" font-size="14" text-anchor="start" font-weight="normal" fill="#222">第 1 章 读取权重（safetensors）</text>
+<rect x="560" y="1882" width="26" height="18" rx="4" fill="#DDF1D6" stroke="#3E8E3E" stroke-width="1.6"/>
+<text x="596" y="1897" font-size="14" text-anchor="start" font-weight="normal" fill="#222">第 2 章 分词器与对话模板</text>
+<rect x="1050" y="1882" width="26" height="18" rx="4" fill="#FFF0C4" stroke="#B5850A" stroke-width="1.6"/>
+<text x="1086" y="1897" font-size="14" text-anchor="start" font-weight="normal" fill="#222">第 3 章 算子</text>
+<rect x="70" y="1917" width="26" height="18" rx="4" fill="#FBDCCB" stroke="#C55A22" stroke-width="1.6"/>
+<text x="106" y="1932" font-size="14" text-anchor="start" font-weight="normal" fill="#222">第 4 章 单层前向（层的组装、注意力、门控 delta 规则）</text>
+<rect x="560" y="1917" width="26" height="18" rx="4" fill="#E7DDF6" stroke="#6B47A6" stroke-width="1.6"/>
+<text x="596" y="1932" font-size="14" text-anchor="start" font-weight="normal" fill="#222">第 5 章 整模前向与贪心解码</text>
+<rect x="1050" y="1917" width="26" height="18" rx="4" fill="#D3EFEE" stroke="#1C8584" stroke-width="1.6"/>
+<text x="1086" y="1932" font-size="14" text-anchor="start" font-weight="normal" fill="#222">第 6 章 缓存、采样与停止</text>
+<text x="20" y="1972" font-size="13" text-anchor="start" font-weight="normal" fill="#444">大框是“组装”，小框是“零件”：比如解码层（橙色大框）由第 3 章的算子（黄色）拼成，第 4 章新增的是两种注意力的核心和残差加法。虚线框是第 6 章加的缓存。</text>
+</svg>
