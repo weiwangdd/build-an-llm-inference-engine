@@ -18,7 +18,9 @@
  * 小向量 w 可以是 BF16 或 F32。
  *
  * 输出：第一行是形状，如 [2,5120]；之后每行一个元素，用 C 的 %a 格式（十六进制浮点，精确无损）。
- * 输出格式由 tests/ops_ref.py 读取并与参考值比较。 */
+ * 输出格式由 tests/ops_ref.py 读取并与参考值比较。
+ *
+ * 第 7 章：make gpu 用 -DUSE_GPU 另建一份（build/gpu/ops），在 GPU 上算，用法和输出格式完全相同。 */
 #include <inttypes.h>
 #include <math.h>
 #include <stdio.h>
@@ -26,6 +28,104 @@
 #include <string.h>
 #include "ops.h"
 #include "st.h"
+
+#ifdef USE_GPU
+/* ---------- 第 7 章：GPU 版 ----------
+ * 每个算子先把输入拷进显存，用 gpu_ops.h 里对应的内核算，再把结果拷回来。
+ * 下面用宏把 op_xxx 换成这里的 g_xxx，main 里的代码一字不改。 */
+#include "gpu_ops.h"
+
+static void gpu_die(const char *msg) { fprintf(stderr, "错误：%s\n", msg); exit(1); }
+
+static void *ins[8];      /* 这一次拷进显存的输入，取结果时一起释放 */
+static size_t nins;
+
+static void *dbuf(size_t bytes) {
+    char err[512];
+    void *d;
+    if (gpu_init(err, sizeof err) || gpu_alloc(&d, bytes, err, sizeof err)) gpu_die(err);
+    return d;
+}
+static void *up(const void *h, size_t bytes) {
+    char err[512];
+    void *d = dbuf(bytes);
+    if (gpu_put(d, h, bytes, err, sizeof err)) gpu_die(err);
+    ins[nins++] = d;
+    return d;
+}
+static void down(float *y, float *dy, size_t n) {
+    char err[512];
+    if (gpu_get(y, dy, n * sizeof *y, err, sizeof err)) gpu_die(err);
+    gpu_free(dy);
+    while (nins) gpu_free(ins[--nins]);
+}
+
+static void g_matmul(float *y, const float *x, const uint8_t *w, size_t n, size_t in, size_t out) {
+    float *dy = dbuf(n * out * sizeof *y);
+    gop_matmul(dy, up(x, n * in * sizeof *x), up(w, 2 * out * in), n, in, out);
+    down(y, dy, n * out);
+}
+static int g_embed(float *y, const uint8_t *table, size_t rows, size_t dim, const int32_t *ids, size_t n,
+                   char *err, size_t errcap) {
+    for (size_t t = 0; t < n; t++)      /* 内核里没法报错，先在 CPU 上查 id（与 op_embed 相同） */
+        if (ids[t] < 0 || (uint64_t)ids[t] >= rows) {
+            snprintf(err, errcap, "第 %zu 个 token id %d 超出嵌入表范围 [0, %zu)", t, ids[t], rows);
+            return -1;
+        }
+    float *dy = dbuf(n * dim * sizeof *y);
+    gop_embed(dy, up(table, 2 * rows * dim), dim, up(ids, n * sizeof *ids), n);
+    down(y, dy, n * dim);
+    return 0;
+}
+static void g_rmsnorm(float *y, const float *x, const float *w, size_t n, size_t d, double eps) {
+    float *dy = dbuf(n * d * sizeof *y);
+    gop_rmsnorm(dy, up(x, n * d * sizeof *x), up(w, d * sizeof *w), n, d, eps);
+    down(y, dy, n * d);
+}
+static void g_rmsnorm_gated(float *y, const float *x, const float *z, const float *w, size_t n, size_t d, double eps) {
+    float *dy = dbuf(n * d * sizeof *y);
+    gop_rmsnorm_gated(dy, up(x, n * d * sizeof *x), up(z, n * d * sizeof *z), up(w, d * sizeof *w), n, d, eps);
+    down(y, dy, n * d);
+}
+static void g_l2norm(float *y, const float *x, size_t n, size_t d, double eps) {
+    float *dy = dbuf(n * d * sizeof *y);
+    gop_l2norm(dy, up(x, n * d * sizeof *x), n, d, eps);
+    down(y, dy, n * d);
+}
+#define ELEMENTWISE(name) static void g_##name(float *y, const float *x, size_t n) { \
+        float *dy = dbuf(n * sizeof *y); gop_##name(dy, up(x, n * sizeof *x), n); down(y, dy, n); }
+ELEMENTWISE(silu)
+ELEMENTWISE(sigmoid)
+ELEMENTWISE(softplus)
+static void g_softmax(float *y, const float *x, size_t n, size_t d) {
+    float *dy = dbuf(n * d * sizeof *y);
+    gop_softmax(dy, up(x, n * d * sizeof *x), n, d);
+    down(y, dy, n * d);
+}
+static void g_rope(float *y, const float *x, const int32_t *pos, size_t n, size_t heads, size_t head_dim, size_t rot,
+                   double theta) {
+    size_t total = n * heads * head_dim;
+    float *dy = dbuf(total * sizeof *y);
+    gop_rope(dy, up(x, total * sizeof *x), up(pos, n * sizeof *pos), n, heads, head_dim, rot, theta);
+    down(y, dy, total);
+}
+static void g_conv1d(float *y, const float *x, const float *w, size_t n, size_t c, size_t k) {
+    float *dy = dbuf(n * c * sizeof *y);
+    gop_conv1d_hist(dy, up(x, n * c * sizeof *x), NULL, 0, up(w, c * k * sizeof *w), n, c, k);
+    down(y, dy, n * c);
+}
+#define op_matmul g_matmul
+#define op_embed g_embed
+#define op_rmsnorm g_rmsnorm
+#define op_rmsnorm_gated g_rmsnorm_gated
+#define op_l2norm g_l2norm
+#define op_silu g_silu
+#define op_sigmoid g_sigmoid
+#define op_softplus g_softplus
+#define op_softmax g_softmax
+#define op_rope g_rope
+#define op_conv1d g_conv1d
+#endif
 
 static void die(const char *fmt, const char *a) {
     fputs("错误：", stderr);

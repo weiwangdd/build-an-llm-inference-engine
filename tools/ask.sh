@@ -6,18 +6,19 @@
 #     -s S      随机数种子，默认 0（种子相同，回答完全相同）
 #     -g        贪心解码（默认按 generation_config.json 采样）
 #     -t        打开思考模式（模型先在 <think> 里写思考过程，要多得多的 token）
+#     -G        在 GPU 上算（第 7 章，需要 CUDA，见 Makefile 的 CUDA 变量）
 #   环境变量 MODEL 指定模型目录，默认 /data/models/Qwen3.8-27B。
 #
-# 现在是 CPU 单线程，27B 每个 token 约 13.5 秒（提示词的 token 也算），一个问题要好几分钟。
+# CPU 版是单线程，27B 每个 token 约 13.5 秒（提示词的 token 也算），一个问题要好几分钟。
 # 需要 make、C 编译器、xxd，以及系统的 python3（只用标准库，给问题做 JSON 转义）。
 set -euo pipefail
 
-usage() { sed -n '4,9p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '4,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
-max=64; seed=0; mode=(); think=false
-while getopts "n:s:gth" o; do
+max=64; seed=0; mode=(); think=false; gpu=0
+while getopts "n:s:gtGh" o; do
     case $o in
-        n) max=$OPTARG;; s) seed=$OPTARG;; g) mode=(--greedy);; t) think=true;; *) usage;;
+        n) max=$OPTARG;; s) seed=$OPTARG;; g) mode=(--greedy);; t) think=true;; G) gpu=1;; *) usage;;
     esac
 done
 shift $((OPTIND - 1))
@@ -31,10 +32,12 @@ done
 shards=("$M"/*.safetensors)
 
 # 和 make test-gen-real 一样：-O2、不带 ASan 另建一份，代码完全相同。源码没变时 make 什么也不做。
-B=$root/build/fast
-make -s -C "$root" BUILD=build/fast SAN= \
+# -G 时建的是 GPU 版（第 7 章），放在 build/gpu/fast。
+d=build/fast; [ $gpu = 1 ] && d=build/gpu/fast
+B=$root/$d
+make -s -C "$root" BUILD=$d GPU=$gpu SAN= \
     CFLAGS="-std=c17 -O2 -g -Wall -Wextra -Wpedantic -Wconversion -Werror -Isrc" \
-    build/fast/tok build/fast/generate >&2
+    $d/tok $d/generate >&2
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
@@ -44,7 +47,8 @@ print(json.dumps({"messages": [{"role": "user", "content": sys.argv[1]}],
                  ensure_ascii=False))' "$1" "$think" > "$tmp/chat.jsonl"
 ids=$("$B/tok" chat "$M/tokenizer.json" "$M/chat_template.jinja" "$tmp/chat.jsonl" | cut -d' ' -f2- | tr ' ' ',')
 case $ids in *[!0-9,]*|"") echo "错误：对话模板渲染失败：$ids" >&2; exit 1;; esac
-echo "（提示词 $(tr ',' '\n' <<< "$ids" | wc -l) 个 token，每个 token 约十几秒）" >&2
+if [ $gpu = 1 ]; then echo "（提示词 $(tr ',' '\n' <<< "$ids" | wc -l) 个 token，GPU 上先要把权重拷进显存）" >&2
+else echo "（提示词 $(tr ',' '\n' <<< "$ids" | wc -l) 个 token，每个 token 约十几秒）" >&2; fi
 
 # 每来一个 token，把目前为止的全部 token 解码一次（跳过特殊 token），只打印新增的字节。
 # tok decode 会把不完整的 UTF-8 换成 U+FFFD（efbfbd）：一个汉字可能被切在两个 token 里，

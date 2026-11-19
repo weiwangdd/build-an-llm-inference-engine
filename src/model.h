@@ -61,16 +61,18 @@ int layer_forward(float *h, size_t n, const int32_t *pos, const model_cfg *c, co
 
 /* ---------- 第 5 章：整个模型 ---------- */
 
-typedef struct {
+typedef struct model {
     model_cfg cfg;
     const uint8_t *embed;        /* 嵌入表，BF16 [vocab, hidden]，指向 mmap 区域 */
     layer_w *layers;             /* [n_layers] */
     float *final_norm;           /* [hidden]，1 + w 形式 */
     bf16_mat lm_head;            /* 输出层，[vocab, hidden] */
+    struct model *gpu;           /* 第 7 章：model_to_gpu（gpu.h）之后指向显存里的那一份，否则为 NULL */
 } model;
 
 /* 读配置，加载嵌入表、每一层、最终归一化和输出层，逐个检查名字、dtype 和形状。
- * 权重仍然留在 s 的 mmap 里，s 要比 m 活得久。 */
+ * 权重仍然留在 s 的 mmap 里，s 要比 m 活得久。
+ * 之后可以用 model_to_gpu（gpu.h）把模型搬到 GPU 上，下面的函数就都在 GPU 上算（第 7 章）。 */
 int  model_load(model *m, const char *config_path, const st_set *s, char *err, size_t errcap);
 void model_free(model *m);
 
@@ -102,11 +104,13 @@ typedef struct {
     size_t n_layers;
     size_t cap, len;         /* 最多能放多少个 token、已经放了多少个 */
     int broken;              /* model_step 中途出错后为 1，缓存不能再用 */
+    int gpu;                 /* 第 7 章：1 表示 layers 里的指针指向显存（给 GPU 上的模型用） */
     layer_cache *layers;
 } model_cache;
 
-/* 建一个能放 cap 个 token 的空缓存。cap 不能超过 max_position_embeddings。 */
-int  model_cache_init(model_cache *kc, const model_cfg *c, size_t cap, char *err, size_t errcap);
+/* 给模型 m 建一个能放 cap 个 token 的空缓存。cap 不能超过 max_position_embeddings。
+ * m 在 GPU 上时缓存也建在显存里（第 7 章）。 */
+int  model_cache_init(model_cache *kc, const model *m, size_t cap, char *err, size_t errcap);
 void model_cache_free(model_cache *kc);
 
 /* 把 n 个新 token 接在缓存里的 kc->len 个 token 后面算一遍，位置是 kc->len .. kc->len + n - 1。
