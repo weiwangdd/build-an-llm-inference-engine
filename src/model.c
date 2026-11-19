@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "gpu.h"
 #include "json.h"
 #include "ops.h"
 
@@ -361,8 +362,10 @@ void model_free(model *m) {
         for (size_t i = 0; i < m->cfg.n_layers; i++) layer_free(&m->layers[i]);
     free(m->layers);
     free(m->final_norm);
+    gpu_model_free(m->gpu);
     m->layers = NULL;
     m->final_norm = NULL;
+    m->gpu = NULL;
 }
 
 int model_load(model *m, const char *config_path, const st_set *s, char *err, size_t cap) {
@@ -400,6 +403,7 @@ static void prefixed(void *p, const char *name, const float *x, size_t rows, siz
  * 这 n 个 token 接在缓存里那 kc->len 个后面，位置从 kc->len 开始。 */
 static int model_run(const model *m, model_cache *kc, const int32_t *ids, size_t n, float *logits,
                      trace_fn T, void *ctx, char *err, size_t cap) {
+    if (m->gpu) return gpu_model_run(m->gpu, kc, ids, n, logits, T, ctx, err, cap);   /* 第 7 章 */
     const model_cfg *c = &m->cfg;
     size_t H = c->hidden, past = kc ? kc->len : 0;
     float *h = malloc(n * H * sizeof *h), *x = malloc(n * H * sizeof *x);
@@ -431,7 +435,8 @@ int model_forward(const model *m, const int32_t *ids, size_t n, float *logits,
 /* ---------- 第 6 章：缓存 ---------- */
 
 void model_cache_free(model_cache *kc) {
-    if (kc->layers)
+    if (kc->gpu) gpu_cache_free(kc);
+    else if (kc->layers)
         for (size_t i = 0; i < kc->n_layers; i++) {
             layer_cache *lc = &kc->layers[i];
             free(lc->k); free(lc->v); free(lc->conv); free(lc->S);
@@ -440,7 +445,8 @@ void model_cache_free(model_cache *kc) {
     memset(kc, 0, sizeof *kc);
 }
 
-int model_cache_init(model_cache *kc, const model_cfg *c, size_t cap, char *err, size_t errcap) {
+int model_cache_init(model_cache *kc, const model *m, size_t cap, char *err, size_t errcap) {
+    const model_cfg *c = &m->cfg;
     memset(kc, 0, sizeof *kc);
     if (cap == 0 || cap > c->max_pos)
         return fail(err, errcap, "缓存容量 %zu 应在 1 到 max_position_embeddings（%zu）之间", cap, c->max_pos);
@@ -448,6 +454,11 @@ int model_cache_init(model_cache *kc, const model_cfg *c, size_t cap, char *err,
     if (!kc->layers) return fail(err, errcap, "内存不足");
     kc->n_layers = c->n_layers;
     kc->cap = cap;
+    if (m->gpu) {                  /* 第 7 章：缓存建在显存里 */
+        kc->gpu = 1;
+        if (gpu_cache_alloc(kc, c, err, errcap)) { model_cache_free(kc); return -1; }
+        return 0;
+    }
     size_t kd = c->kv_heads * c->head_dim;
     size_t cd = 2 * c->lk_heads * c->lk_dim + c->lv_heads * c->lv_dim;
     for (size_t i = 0; i < c->n_layers; i++) {
@@ -472,6 +483,7 @@ int model_step(const model *m, model_cache *kc, const int32_t *ids, size_t n, fl
                trace_fn T, void *ctx, char *err, size_t cap) {
     if (kc->broken) return fail(err, cap, "缓存在上一次出错时已经损坏，不能接着用");
     if (kc->n_layers != m->cfg.n_layers) return fail(err, cap, "缓存与模型的层数不符");
+    if (kc->gpu != (m->gpu != NULL)) return fail(err, cap, "缓存与模型不在同一个设备上（一个在 GPU，一个在 CPU）");
     if (n == 0) return fail(err, cap, "至少要给一个 token");
     if (n > kc->cap - kc->len)
         return fail(err, cap, "缓存已有 %zu 个 token，再放 %zu 个会超过容量 %zu", kc->len, n, kc->cap);

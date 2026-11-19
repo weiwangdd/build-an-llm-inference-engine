@@ -16,12 +16,15 @@
  *   logits <V>               之后 V 行，选这个 token 时看的那一行 logits，%a 格式
  *   dist <K>                 之后 K 行 “<id> <概率 %a>”，采样的分布，按 id 从小到大
  *   draw <u %a>              这一步的随机数（只在采样时有）
- * tests/gen_ref.py 和 tests/gen_official.py 读这个输出。带不带缓存、提示词怎么分块，输出都应当逐字节相同。 */
+ * tests/gen_ref.py 和 tests/gen_official.py 读这个输出。带不带缓存、提示词怎么分块，输出都应当逐字节相同。
+ *
+ * 第 7 章：make gpu 用 -DUSE_GPU 另建一份（build/gpu/generate），在 GPU 上算，用法和输出格式完全相同。 */
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "gen.h"
+#include "gpu.h"
 #include "model.h"
 #include "st.h"
 
@@ -127,6 +130,9 @@ int main(int argc, char **argv) {
     if (st_set_open(&S, (const char *const *)(argv + a), (size_t)(argc - a), err, sizeof err)) die(err);
     model M;
     if (model_load(&M, argv[1], &S, err, sizeof err)) die(err);
+#ifdef USE_GPU
+    if (model_to_gpu(&M, err, sizeof err)) die(err);      /* 第 7 章：GPU 版 */
+#endif
     gen_cfg G;
     if (gen_cfg_load(&G, argv[2], M.cfg.vocab, err, sizeof err)) die(err);
     if (greedy >= 0) G.sample.do_sample = !greedy;

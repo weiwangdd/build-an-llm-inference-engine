@@ -116,7 +116,7 @@ int generate(const model *m, const gen_cfg *g, const gen_opts *o, const int32_t 
     int rc = -1;
     if (!seq || !kids || !probs || !logits) { fail(err, cap, "内存不足"); goto done; }
     memcpy(seq, prompt, n * sizeof *seq);
-    if (!o->no_cache && model_cache_init(&kc, c, total, err, cap)) goto done;
+    if (!o->no_cache && model_cache_init(&kc, m, total, err, cap)) goto done;
 
     rng64 r;
     rng_seed(&r, o->seed);

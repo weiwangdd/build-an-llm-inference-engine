@@ -6,12 +6,15 @@
  * 最后一步本来在第 64 层之后才做，这里接在这一层后面，只是为了让它的权重也得到对拍。
  *
  * 输出：每一步一段，第一行是“名字 [行,列]”，之后每行一个元素，用 %a 格式。
- * tests/layer_ref.py 和 tests/layer_official.py 读这个输出。 */
+ * tests/layer_ref.py 和 tests/layer_official.py 读这个输出。
+ *
+ * 第 7 章：make gpu 用 -DUSE_GPU 另建一份（build/gpu/layer），在 GPU 上算，用法和输出格式完全相同。 */
 #include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "gpu.h"
 #include "model.h"
 #include "ops.h"
 #include "st.h"
@@ -80,7 +83,12 @@ int main(int argc, char **argv) {
     if (!h || !y) die("内存不足");
     if (op_embed(h, emb->data, cfg.vocab, H, ids, n, err, sizeof err)) die(err);
     print(NULL, "embed", h, n, H);
+#ifdef USE_GPU
+    /* 第 7 章：GPU 版只把这一层放到 GPU 上算，嵌入和最终归一化仍在 CPU 上（它们由 forward 的测试查） */
+    if (gpu_layer_forward(h, n, pos, &cfg, &w, print, NULL, err, sizeof err)) die(err);
+#else
     if (layer_forward(h, n, pos, &cfg, &w, print, NULL, err, sizeof err)) die(err);
+#endif
     op_rmsnorm(y, h, fnorm, n, H, cfg.eps);
     print(NULL, "final_norm", y, n, H);
     if (fflush(stdout) || ferror(stdout)) die("写输出出错");

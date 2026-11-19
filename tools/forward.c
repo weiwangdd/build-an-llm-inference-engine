@@ -11,11 +11,14 @@
  *   all     每一层的每一步都打印，名字是 layers.<i>.<步骤名>
  *   layers  只打印 embed、每一层的输出 layers.<i>.out、final_norm 和 logits（真实模型用，否则输出太多）
  * m > 0 时最后再打印一段 “greedy [1,m]”，每行一个生成的 token id（十进制）。
- * tests/model_ref.py 和 tests/model_official.py 读这个输出。 */
+ * tests/model_ref.py 和 tests/model_official.py 读这个输出。
+ *
+ * 第 7 章：make gpu 用 -DUSE_GPU 另建一份（build/gpu/forward），在 GPU 上算，用法和输出格式完全相同。 */
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "gpu.h"
 #include "model.h"
 #include "st.h"
 
@@ -78,6 +81,9 @@ int main(int argc, char **argv) {
     if (st_set_open(&S, (const char *const *)(argv + 5), (size_t)(argc - 5), err, sizeof err)) die(err);
     model M;
     if (model_load(&M, argv[1], &S, err, sizeof err)) die(err);
+#ifdef USE_GPU
+    if (model_to_gpu(&M, err, sizeof err)) die(err);      /* 第 7 章：GPU 版 */
+#endif
 
     size_t V = M.cfg.vocab, steps = m > 0 ? (size_t)m : 1;      /* 前向的次数 */
     float *logits = malloc((n + steps - 1) * V * sizeof *logits);

@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 命令
 
-需要 C17 编译器、make、Python 3。第 2 章的测试需要 `tokenizers` 库（验证过 0.21.4–0.23.3），对话模板的对拍还需要 `transformers` 和 `jinja2`（前者不会自动带上后者；没装时打印 SKIP），第 4、5、6 章的第二层对拍需要 `torch` 和 `transformers`（没装时打印 SKIP）。系统 Python 通常没有它，装在虚拟环境里，用 `PYTHON=$HOME/venvs/.../bin/python` 传给所有 `make test*` 目标（`tests/run_tok.sh` 读这个环境变量；第 1 章的 `tests/run.sh` 固定用 `python3`，只需标准库）。在 zsh 里不要写 `PYTHON=~/...`，`~` 不会展开。
+需要 C17 编译器、make、Python 3；第 7 章的 GPU 版另需 CUDA 工具包（`CUDA=` 默认 `/usr/local/cuda`，`CUDA_ARCH=` 默认 `sm_120`，nvcc 默认取 `$(CUDA)/bin/nvcc`）。第 2 章的测试需要 `tokenizers` 库（验证过 0.21.4–0.23.3），对话模板的对拍还需要 `transformers` 和 `jinja2`（前者不会自动带上后者；没装时打印 SKIP），第 4、5、6 章的第二层对拍需要 `torch` 和 `transformers`（没装时打印 SKIP）。系统 Python 通常没有它，装在虚拟环境里，用 `PYTHON=$HOME/venvs/.../bin/python` 传给所有 `make test*` 目标（`tests/run_tok.sh` 读这个环境变量；第 1 章的 `tests/run.sh` 固定用 `python3`，只需标准库）。在 zsh 里不要写 `PYTHON=~/...`，`~` 不会展开。
 
 ```
 make                 # 构建 build/st_dump、build/tok、build/ops、build/layer、build/forward 和 build/generate
@@ -27,12 +27,15 @@ make test-ops-real MODEL=<模型目录>   # 第 3 章：拿真实权重当算子
 make test-layer-real MODEL=<模型目录> PYTHON=...   # 第 4 章：真实模型的四层，两层对拍，十几分钟
 make test-model-real MODEL=<模型目录> PYTHON=...   # 第 5 章：整模前向加贪心解码 8 个 token，用 -O2 无 ASan 另建的 build/fast/forward
 make test-gen-real MODEL=<模型目录> PYTHON=...     # 第 6 章：带缓存贪心 8 个 + 对话模板采样，与不带缓存逐位对拍，同样用 build/fast
+make gpu                                           # 第 7 章：GPU 版到 build/gpu（GPU=1 递归调用自己），工具与 CPU 版同名同用法
+make test-gpu PYTHON=...                           # 第 7 章：第 3–6 章的测试脚本拿 build/gpu 再跑一遍，加 tests/run_gpu.sh 的 GPU/CPU 比较
+make test-gpu-real MODEL=<模型目录> PYTHON=...     # 第 7 章：真实模型上第 4/5/6 章的 real 测试换成 GPU 版，再 GPU/CPU 逐层比较，约 18 分钟
 python3 tools/gen_architecture.py   # 重新生成 README 里的架构图 book/images/qwen38-architecture.svg（改了结构或新增章节时更新）
 make unicode-tables  # 从 UCD 9.0 和 16.0 重新生成 src/unicode_tables.c（下载地址见 tools/gen_unicode.c）
-tools/ask.sh [-n N] [-s S] [-g] [-t] "问题"   # 向真实模型提问（MODEL 默认 /data/models/Qwen3.8-27B），边生成边打印，用 build/fast 的 -O2 程序
+tools/ask.sh [-n N] [-s S] [-g] [-t] [-G] "问题"   # 向真实模型提问（MODEL 默认 /data/models/Qwen3.8-27B），边生成边打印，用 build/fast 的 -O2 程序，-G 用 build/gpu/fast 的 GPU 版
 ```
 
-单独跑某一章：`sh tests/run.sh build`（第 1 章）、`sh tests/run_tok.sh build`（第 2 章）、`sh tests/run_ops.sh build`（第 3 章）、`sh tests/run_layer.sh build`（第 4 章）、`sh tests/run_model.sh build`（第 5 章）或 `sh tests/run_gen.sh build`（第 6 章），参数见脚本头部。单个对拍可以手工跑两边再 diff，例如：
+单独跑某一章：`sh tests/run.sh build`（第 1 章）、`sh tests/run_tok.sh build`（第 2 章）、`sh tests/run_ops.sh build`（第 3 章）、`sh tests/run_layer.sh build`（第 4 章）、`sh tests/run_model.sh build`（第 5 章）、`sh tests/run_gen.sh build`（第 6 章）或 `sh tests/run_gpu.sh build build/gpu`（第 7 章，GPU 与 CPU 比较；第 3–6 章的脚本把 build 换成 build/gpu 即测 GPU 版），参数见脚本头部。单个对拍可以手工跑两边再 diff，例如：
 
 ```
 python3 tests/tok_ref.py encode build/tok_fixtures/tokenizer.json build/tok_fixtures/texts.jsonl > ref.txt
@@ -57,6 +60,7 @@ build/tok encode build/tok_fixtures/tokenizer.json build/tok_fixtures/texts.json
 - **第 4 章 单层前向（`src/model.[ch]`、`tools/layer.c`，`src/ops.c` 里新增注意力和门控 delta 规则）**：`model_cfg_load` 读 config.json 的 `text_config`，只接受 Qwen3.8 那一种配置；`layer_load` 按配置检查一层每个张量的名字、dtype、形状；`layer_forward` 每算完一步调用一次 trace 回调。`layer` 工具算“嵌入 → 一层 → 最终归一化”，按“名字 [行,列]”加 `%a` 打印每一步。对拍分两层（Wei 定的方案）：`tests/layer_ref.py`（标准库）拿 C 每一步的输入算精确值，容差同第 3 章，步骤名和顺序必须一致；`tests/layer_official.py` 调用 transformers 的 `Qwen3_5DecoderLayer` 在 float64 下算（屏蔽 fla、causal_conv1d，用 eager 注意力），每个张量最大误差除以均方根不超过 2⁻¹²，没装 torch 打印 SKIP。改 C 的步骤名或顺序时，两个参考实现都要跟着改。小模型由 `tests/make_layer_fixtures.py` 生成。
 - **第 5 章 整模前向（`src/model.[ch]` 里的 `model_load`、`model_forward`、`logits_argmax`，`tools/forward.c`）**：嵌入 → 全部层 → 最终归一化 → 顶层的 `lm_head.weight`，输出 [n, vocab] 的 logits；`tie_word_embeddings` 只接受 false。`forward` 工具做最朴素的贪心解码（每一步都从头前向，没有缓存），只打印最后一次前向：`all` 打印每层每一步（名字加 `layers.<i>.` 前缀），`layers` 只打印每层的 `out`；最后一段 `greedy [1,m]` 是十进制 id。对拍仍是两层：`tests/model_ref.py` 复用 `layer_ref.layer_plan` 逐步检查，并检查生成的 token 是那一行的最大值（同样大取 id 小的）；`tests/model_official.py` 逐层加载（27B 的 float64 放不进内存），每层拿 C 的上一层输出做输入按 2⁻¹² 判定，再让官方 float64 自己串起全部层，要求贪心 token 完全相同（利用因果性，对 C 最后一次前向的输入跑一遍就能逐行检查）；官方 BF16 只报告不判定（Wei 定的）。小模型上还用官方 `Qwen3_5ForCausalLM` 和它的 `generate` 核对。另有不依赖 Python 的已知答案：前缀的 logits 逐位相同、接着生成结果不变。小模型由 `tests/make_model_fixtures.py` 生成（8 层，带 lm_head）。
 - **第 6 章 生成循环（`src/model.[ch]` 里的 `model_cache`、`model_step`，`src/sample.[ch]`、`src/gen.[ch]`、`tools/generate.c`）**：缓存存全注意力层 RoPE 之后的 k、v，和线性注意力层的卷积窗口（最近 conv_k-1 个 token 的 qkv）、delta 状态 S（double）。`layer_forward`/`model_forward` 与带缓存的版本走同一个内部函数（缓存为 NULL 即第 4、5 章的行为）；`ops.c` 里的 `op_attention_past`、`op_conv1d_hist`、`op_gated_delta_state` 是原算子的推广，求和的项和次序不变，所以**带缓存与不带缓存逐位相同**，改这些代码时必须保持。采样：温度 → top-k（与第 k 名同分的都留）→ top-p，照 transformers 的 logits 处理器；逆变换采样按 id 顺序累加；随机数是 splitmix64（与 Java `SplittableRandom` 相同）。`generation_config.json` 只接受 7 个已知字段加 transformers_version，采样时 temperature/top_k/top_p 必须写明。`generate` 工具的 `--dump` 输出每步 logits、分布、随机数；`--no-cache`、`--chunk` 用于已知答案（输出必须逐字节相同）。对拍（Wei 定的方案：分布对拍加固定随机数）：`tests/gen_ref.py`（标准库，随机数完全相等、保留集合相同、概率相对误差 ≤1e-9、选中 token 相同、停止对）；`tests/gen_official.py warpers` 用官方 logits 处理器作用在 C 的 logits 上，`full` 另在小模型上跑官方 `generate`，把 `torch.multinomial` 换成“记下官方概率、返回 C 的选择”，检查分布（2⁻¹²）和停止位置。另把“提示词加生成 token”交给 `forward` 一次前向，后几行 logits 与生成时逐位相同，并过 `model_ref.py`。
+- **第 7 章 单卡 GPU 后端（`src/gpu_ops.[h,cu]`、`src/gpu_model.c`、`src/gpu.h`、`src/gpu_none.c`）**：`gpu_ops.cu` 是唯一的 CUDA 文件，`gop_xxx` 与 `ops.h` 的 `op_xxx` 一一对应（指针指向显存），每个线程算一个输出（归一化一行、门控 delta 规则一列、注意力一个线程块合作），线程内的循环与 `ops.c` 一字不差：double 累加、求和次序相同、`nvcc --fmad=false`，所以 GPU 与 CPU 逐位相同（实测小模型和 27B 全部逐位相同；理论上只有 CUDA 与 glibc 的 exp/sin/cos/pow 可能偶尔差 1 ulp）。改内核或 `ops.c` 时必须保持两边次序一致。`gpu_model.c` 是普通 C，与 `model.c` 的 `layer_run`/`full_attention`/`linear_attention`/`model_run` 逐行对应，步骤名相同；显存里的模型复用 `model`/`layer_w`/`model_cache` 结构体（指针指向显存）。`model_to_gpu` 之后 `model_forward`/`model_step` 转到 GPU，`model_cache_init` 接收模型（GPU 模型的缓存建在显存）。内核不能报错，所以 token id 等检查在启动内核前于 CPU 上做。没有 CUDA 时链接 `gpu_none.c`（一律报错）。工具用 `-DUSE_GPU` 编译出 GPU 版（加载后调用 `model_to_gpu`；`layer` 只把那一层放 GPU；`ops` 用宏把 `op_xxx` 换成上传-计算-下载的包装）。对拍方案（Wei 定的）：第 3–6 章测试原样跑 GPU 版，再由 `tests/gpu_cmp.py`（标准库）比较 GPU 与 CPU：结构、token、停止相同，每张量误差 ≤ 均方根·2⁻¹²，报告逐位相同比例。GPU 版的 ASan 运行要 `ASAN_OPTIONS=protect_shadow_gap=0:detect_leaks=0`；显存一侧用 `compute-sanitizer` 检查。
 
 ## 约定
 

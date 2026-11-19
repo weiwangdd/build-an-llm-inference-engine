@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1520" height="2000" viewBox="0 0 1520 2000" font-family="PingFang SC, Hiragino Sans GB, Noto Sans CJK SC, Source Han Sans SC, Microsoft YaHei, WenQuanYi Zen Hei, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1520" height="2030" viewBox="0 0 1520 2030" font-family="PingFang SC, Hiragino Sans GB, Noto Sans CJK SC, Source Han Sans SC, Microsoft YaHei, WenQuanYi Zen Hei, sans-serif">
 <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="context-stroke"/></marker></defs>
-<rect width="1520" height="2000" fill="#FFFFFF"/>
+<rect width="1520" height="2030" fill="#FFFFFF"/>
 <text x="760.0" y="40" font-size="26" text-anchor="middle" font-weight="bold" fill="#222">Qwen3.8-27B 推理的完整路径：从提问到回答</text>
 <text x="760.0" y="68" font-size="15" text-anchor="middle" font-weight="normal" fill="#555">颜色表示由哪一章实现；方括号里是每个 token 的张量形状；n 是 token 个数</text>
 <rect x="370" y="96" width="200" height="70" rx="8" fill="#FFFFFF" stroke="#3E8E3E" stroke-width="1.6"/>
@@ -274,4 +274,5 @@
 <rect x="1050" y="1917" width="26" height="18" rx="4" fill="#D3EFEE" stroke="#1C8584" stroke-width="1.6"/>
 <text x="1086" y="1932" font-size="14" text-anchor="start" font-weight="normal" fill="#222">第 6 章 缓存、采样与停止</text>
 <text x="20" y="1972" font-size="13" text-anchor="start" font-weight="normal" fill="#444">大框是“组装”，小框是“零件”：比如解码层（橙色大框）由第 3 章的算子（黄色）拼成，第 4 章新增的是两种注意力的核心和残差加法。虚线框是第 6 章加的缓存。</text>
+<text x="20" y="1997" font-size="13" text-anchor="start" font-weight="normal" fill="#444">第 7 章把图里的全部计算（嵌入、64 层、输出层和缓存）搬到一张 GPU 上：步骤与上图一一对应，结果与 CPU 版逐位相同。</text>
 </svg>

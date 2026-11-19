@@ -1,7 +1,7 @@
 # 生成 book/images/qwen38-architecture.svg：Qwen3.8-27B 的架构图，按实现它的章节上色。
 # 用法：python3 tools/gen_architecture.py [输出路径]
 import html, sys
-W, H = 1520, 2000
+W, H = 1520, 2030
 C = {  # 章: (填充, 描边, 名称)
  1: ("#DCE8F7", "#3D6FAE", "第 1 章 读取权重（safetensors）"),
  2: ("#DDF1D6", "#3E8E3E", "第 2 章 分词器与对话模板"),
@@ -246,6 +246,7 @@ for ch, (x, y) in zip(range(1, 7), cols):
     out.append(f'<rect x="{x}" y="{y-15}" width="26" height="18" rx="4" fill="{f}" stroke="{s}" stroke-width="1.6"/>')
     text(x+36, y, name, 14, anchor="start")
 text(20, ly2+75, "大框是“组装”，小框是“零件”：比如解码层（橙色大框）由第 3 章的算子（黄色）拼成，第 4 章新增的是两种注意力的核心和残差加法。虚线框是第 6 章加的缓存。", 13, anchor="start", color="#444")
+text(20, ly2+100, "第 7 章把图里的全部计算（嵌入、64 层、输出层和缓存）搬到一张 GPU 上：步骤与上图一一对应，结果与 CPU 版逐位相同。", 13, anchor="start", color="#444")
 
 svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" font-family="PingFang SC, Hiragino Sans GB, Noto Sans CJK SC, Source Han Sans SC, Microsoft YaHei, WenQuanYi Zen Hei, sans-serif">
 <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="context-stroke"/></marker></defs>

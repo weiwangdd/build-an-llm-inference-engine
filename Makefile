@@ -4,6 +4,26 @@ SAN     ?= -fsanitize=address,undefined -fno-sanitize-recover=all
 BUILD   ?= build
 PYTHON  ?= python3
 
+# 第 7 章：GPU=1 时（make gpu 会这样调用自己）构建 GPU 版，模型交给 gpu_model.c 和 gpu_ops.cu；
+# 否则链接 gpu_none.c，GPU 的函数一律报错。
+CUDA      ?= /usr/local/cuda
+NVCC      ?= $(CUDA)/bin/nvcc
+CUDA_ARCH ?= sm_120
+# --fmad=false：不把 a * b + c 合并成一条 FMA 指令（只舍入一次），保持与 CPU 相同的舍入
+NVFLAGS   ?= -std=c++17 -O2 -g -arch=$(CUDA_ARCH) --fmad=false -Werror all-warnings -Xcompiler -Wall,-Wextra
+GPU       ?= 0
+ifeq ($(GPU),1)
+BACKEND  = src/gpu_model.c
+GPU_OBJ  = $(BUILD)/gpu_ops.o
+DEFS     = -DUSE_GPU
+LIBS     = -L$(CUDA)/lib64 -Wl,-rpath,$(CUDA)/lib64 -lcudart -lstdc++
+else
+BACKEND  = src/gpu_none.c
+GPU_OBJ  =
+DEFS     =
+LIBS     =
+endif
+
 TOK_SRC = src/tok.c src/json.c src/unicode.c src/unicode_tables.c src/chat.c src/sha256.c
 
 all: $(BUILD)/st_dump $(BUILD)/tok $(BUILD)/ops $(BUILD)/layer $(BUILD)/forward $(BUILD)/generate
@@ -16,27 +36,32 @@ $(BUILD)/tok: tools/tok.c $(TOK_SRC) src/tok.h src/json.h src/unicode.h src/unic
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(SAN) -o $@ tools/tok.c $(TOK_SRC)
 
-$(BUILD)/ops: tools/ops.c src/ops.c src/ops.h src/st.c src/st.h
+$(BUILD)/ops: tools/ops.c src/ops.c src/ops.h src/st.c src/st.h src/gpu_ops.h $(GPU_OBJ)
 	@mkdir -p $(BUILD)
-	$(CC) $(CFLAGS) $(SAN) -o $@ tools/ops.c src/ops.c src/st.c -lm
+	$(CC) $(CFLAGS) $(DEFS) $(SAN) -o $@ tools/ops.c src/ops.c src/st.c $(GPU_OBJ) -lm $(LIBS)
 
-$(BUILD)/layer: tools/layer.c src/model.c src/model.h src/ops.c src/ops.h src/st.c src/st.h src/json.c src/json.h
+MODEL_SRC = src/model.c src/ops.c src/st.c src/json.c $(BACKEND)
+MODEL_HDR = src/model.h src/ops.h src/st.h src/json.h src/gpu.h src/gpu_ops.h
+
+$(BUILD)/layer: tools/layer.c $(MODEL_SRC) $(MODEL_HDR) $(GPU_OBJ)
 	@mkdir -p $(BUILD)
-	$(CC) $(CFLAGS) $(SAN) -o $@ tools/layer.c src/model.c src/ops.c src/st.c src/json.c -lm
+	$(CC) $(CFLAGS) $(DEFS) $(SAN) -o $@ tools/layer.c $(MODEL_SRC) $(GPU_OBJ) -lm $(LIBS)
 
-MODEL_SRC = src/model.c src/ops.c src/st.c src/json.c
-MODEL_HDR = src/model.h src/ops.h src/st.h src/json.h
-
-$(BUILD)/forward: tools/forward.c $(MODEL_SRC) $(MODEL_HDR)
+$(BUILD)/forward: tools/forward.c $(MODEL_SRC) $(MODEL_HDR) $(GPU_OBJ)
 	@mkdir -p $(BUILD)
-	$(CC) $(CFLAGS) $(SAN) -o $@ tools/forward.c $(MODEL_SRC) -lm
+	$(CC) $(CFLAGS) $(DEFS) $(SAN) -o $@ tools/forward.c $(MODEL_SRC) $(GPU_OBJ) -lm $(LIBS)
 
 GEN_SRC = $(MODEL_SRC) src/gen.c src/sample.c
 GEN_HDR = $(MODEL_HDR) src/gen.h src/sample.h
 
-$(BUILD)/generate: tools/generate.c $(GEN_SRC) $(GEN_HDR)
+$(BUILD)/generate: tools/generate.c $(GEN_SRC) $(GEN_HDR) $(GPU_OBJ)
 	@mkdir -p $(BUILD)
-	$(CC) $(CFLAGS) $(SAN) -o $@ tools/generate.c $(GEN_SRC) -lm
+	$(CC) $(CFLAGS) $(DEFS) $(SAN) -o $@ tools/generate.c $(GEN_SRC) $(GPU_OBJ) -lm $(LIBS)
+
+# 第 7 章：GPU 内核由 nvcc 编译成目标文件，再和其余的 C 代码链接在一起
+$(BUILD)/gpu_ops.o: src/gpu_ops.cu src/gpu_ops.h
+	@mkdir -p $(BUILD)
+	$(NVCC) $(NVFLAGS) -c -o $@ src/gpu_ops.cu
 
 # 第 1 到 6 章的快速测试
 test: $(BUILD)/st_dump $(BUILD)/tok $(BUILD)/ops $(BUILD)/layer $(BUILD)/forward $(BUILD)/generate
@@ -74,6 +99,36 @@ test-gen-real: $(BUILD)/tok
 	$(MAKE) BUILD=$(FAST) SAN= CFLAGS="$(subst -O1,-O2,$(CFLAGS))" $(FAST)/forward $(FAST)/generate
 	PYTHON=$(PYTHON) FORWARD=$(FAST)/forward GENERATE=$(FAST)/generate sh tests/run_gen.sh $(BUILD) real $(MODEL)
 
+# ---------- 第 7 章：单卡 GPU ----------
+# GPU 版放在 $(BUILD)/gpu，工具的名字、用法、输出与 CPU 版完全相同，只是在 GPU 上算。
+# 第 3 到 6 章的测试脚本原样拿 GPU 版再跑一遍，再加上 GPU 与 CPU 的逐层比较（tests/run_gpu.sh）。
+# CUDA 的运行库与 ASan 默认的设置冲突（ASan 占住了一段 CUDA 要用的地址），要关掉 protect_shadow_gap。
+GPUB    = $(BUILD)/gpu
+GPU_ENV = ASAN_OPTIONS=protect_shadow_gap=0:detect_leaks=0
+gpu:
+	$(MAKE) BUILD=$(GPUB) GPU=1 all
+
+test-gpu: all gpu
+	$(GPU_ENV) PYTHON=$(PYTHON) sh tests/run_ops.sh $(GPUB)
+	$(GPU_ENV) PYTHON=$(PYTHON) sh tests/run_layer.sh $(GPUB)
+	$(GPU_ENV) PYTHON=$(PYTHON) sh tests/run_model.sh $(GPUB)
+	$(GPU_ENV) PYTHON=$(PYTHON) sh tests/run_gen.sh $(GPUB)
+	$(GPU_ENV) PYTHON=$(PYTHON) sh tests/run_gpu.sh $(BUILD) $(GPUB)
+
+# 第 7 章：在真实模型上验收 GPU 版，例如
+#   make test-gpu-real MODEL=/data/models/Qwen3.8-27B PYTHON=$HOME/venvs/x/bin/python
+# 依次是：第 4 章的四层逐步对拍、第 5 章的整模贪心、第 6 章的缓存与采样（都换成 GPU 版），
+# 最后 GPU 与 CPU 逐层比较。和第 5、6 章一样，跑整个模型的那几份用 -O2、不带 ASan 另建。
+GPU_FAST = $(GPUB)/fast
+test-gpu-real: $(BUILD)/tok
+	$(MAKE) BUILD=$(GPUB) GPU=1 $(GPUB)/tok $(GPUB)/layer
+	$(MAKE) BUILD=$(GPU_FAST) GPU=1 SAN= CFLAGS="$(subst -O1,-O2,$(CFLAGS))" $(GPU_FAST)/forward $(GPU_FAST)/generate
+	$(MAKE) BUILD=$(FAST) SAN= CFLAGS="$(subst -O1,-O2,$(CFLAGS))" $(FAST)/forward
+	$(GPU_ENV) PYTHON=$(PYTHON) sh tests/run_layer.sh $(GPUB) real $(MODEL)
+	PYTHON=$(PYTHON) FORWARD=$(GPU_FAST)/forward sh tests/run_model.sh $(GPUB) real $(MODEL)
+	PYTHON=$(PYTHON) FORWARD=$(GPU_FAST)/forward GENERATE=$(GPU_FAST)/generate sh tests/run_gen.sh $(GPUB) real $(MODEL)
+	PYTHON=$(PYTHON) sh tests/run_gpu.sh $(FAST) $(GPU_FAST) real $(MODEL) $(BUILD)/tok
+
 # 第 2 章：全部 Unicode 码点的穷举对拍，几分钟
 test-unicode: $(BUILD)/tok
 	sh tests/run_tok.sh $(BUILD) unicode
@@ -95,4 +150,4 @@ unicode-tables: tools/gen_unicode.c
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all test test-unicode test-real test-ops-real test-layer-real test-model-real test-gen-real unicode-tables clean
+.PHONY: all gpu test test-gpu test-gpu-real test-unicode test-real test-ops-real test-layer-real test-model-real test-gen-real unicode-tables clean
