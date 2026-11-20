@@ -13,7 +13,7 @@
  *   --log-steps      每一步在 stderr 打印这一批由哪些请求组成
  *   --slow MS        测试用：每一步之后多等 MS 毫秒（模拟大模型的速度，好测取消）
  *
- * 接口见 src/api.h，结构见 src/server.h。Ctrl-C 或 SIGTERM 停止。
+ * 接口见 src/08-serve/api.h，结构见 src/08-serve/server.h。Ctrl-C 或 SIGTERM 停止。
  * make gpu 另建一份 GPU 版（build/gpu/serve），用法相同。 */
 #include <inttypes.h>
 #include <stdio.h>

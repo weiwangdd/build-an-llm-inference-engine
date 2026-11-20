@@ -36,7 +36,7 @@ shards=("$M"/*.safetensors)
 d=build/fast; [ $gpu = 1 ] && d=build/gpu/fast
 B=$root/$d
 make -s -C "$root" BUILD=$d GPU=$gpu SAN= \
-    CFLAGS="-std=c17 -O2 -g -Wall -Wextra -Wpedantic -Wconversion -Werror -Isrc" \
+    CFLAGS="-std=c17 -O2 -g -Wall -Wextra -Wpedantic -Wconversion -Werror" \
     $d/tok $d/generate >&2
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT

@@ -77,9 +77,9 @@ typedef struct {
 
 代码分成三个文件：
 
-- [`src/gpu_ops.cu`](../src/gpu_ops.cu)：内核。这是唯一一个 CUDA 文件，每个内核对应 `ops.c` 的一个算子，接口在 [`src/gpu_ops.h`](../src/gpu_ops.h)，与 `ops.h` 一一对应，参数相同，只是指针指向显存。另有几个分配、拷贝显存的函数。
-- [`src/gpu_model.c`](../src/gpu_model.c)：普通的 C，和其余代码一样用 gcc 加全部警告编译。它负责安排：分配显存、按顺序调用内核。里面的 `layer_run`、`full_attention`、`linear_attention`、`model_run` 与 `model.c` 里的同名函数一行一行对应。
-- [`src/gpu_none.c`](../src/gpu_none.c)：没有 CUDA 的机器上用它代替上面两个，`model_to_gpu` 一律报错“编译时没有启用 CUDA”。这样 Mac 和没有显卡的机器照样能编译、测试前 6 章。
+- [`src/07-gpu/gpu_ops.cu`](../src/07-gpu/gpu_ops.cu)：内核。这是唯一一个 CUDA 文件，每个内核对应 `ops.c` 的一个算子，接口在 [`src/07-gpu/gpu_ops.h`](../src/07-gpu/gpu_ops.h)，与 `ops.h` 一一对应，参数相同，只是指针指向显存。另有几个分配、拷贝显存的函数。
+- [`src/07-gpu/gpu_model.c`](../src/07-gpu/gpu_model.c)：普通的 C，和其余代码一样用 gcc 加全部警告编译。它负责安排：分配显存、按顺序调用内核。里面的 `layer_run`、`full_attention`、`linear_attention`、`model_run` 与 `model.c` 里的同名函数一行一行对应。
+- [`src/07-gpu/gpu_none.c`](../src/07-gpu/gpu_none.c)：没有 CUDA 的机器上用它代替上面两个，`model_to_gpu` 一律报错“编译时没有启用 CUDA”。这样 Mac 和没有显卡的机器照样能编译、测试前 6 章。
 
 `gpu_model.c` 和 `model.c` 有一半是重复的。也可以只写一份，把“调用哪个算子、怎么分配内存”做成一张函数表，CPU 和 GPU 各填一张。我们没有这么做：两份代码并排放着，一眼就能看出一一对应；步骤名或次序写错了，测试会发现（参考实现要求步骤名和顺序完全一致）。
 
@@ -178,7 +178,7 @@ GPU 版的小模型测试仍然开着 ASan 和 UBSan（第 1 章），检查的�
 
 第 4 章的 `layer` 工具在 GPU 版里只把那一层放到 GPU 上，嵌入和最终归一化仍在 CPU 上算；这两步的 GPU 内核由第 3 章的 `ops`（嵌入）和第 5 章的 `forward`（两者都有）检查。
 
-**GPU 与 CPU 逐层比较**，入口是 [`tests/run_gpu.sh`](../tests/run_gpu.sh)，比较由 [`tests/gpu_cmp.py`](../tests/gpu_cmp.py) 做（只用标准库）。第 4 章的 7 个单层用例、第 5 章的 6 个整模用例（`all` 方式，每层每一步都打印）、第 6 章的 8 个生成用例（`--dump`，每一步的 logits），两边各跑一次，要求步骤名、形状、token、停止原因完全相同，每个张量误差不超过均方根的 2⁻¹²，并报告逐位相同的元素有多少、最多差几个 ulp。
+**GPU 与 CPU 逐层比较**，入口是 [`tests/07-gpu/run_gpu.sh`](../tests/07-gpu/run_gpu.sh)，比较由 [`tests/07-gpu/gpu_cmp.py`](../tests/07-gpu/gpu_cmp.py) 做（只用标准库）。第 4 章的 7 个单层用例、第 5 章的 6 个整模用例（`all` 方式，每层每一步都打印）、第 6 章的 8 个生成用例（`--dump`，每一步的 logits），两边各跑一次，要求步骤名、形状、token、停止原因完全相同，每个张量误差不超过均方根的 2⁻¹²，并报告逐位相同的元素有多少、最多差几个 ulp。
 
 “差几个 ulp”是这样算的：把 float 的 32 位按有符号整数的大小排好（正数照原样，负数取反），相邻的两个 float 正好差 1，两个数的 ulp 距离就是这两个整数之差。
 

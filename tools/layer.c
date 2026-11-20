@@ -6,7 +6,7 @@
  * 最后一步本来在第 64 层之后才做，这里接在这一层后面，只是为了让它的权重也得到对拍。
  *
  * 输出：每一步一段，第一行是“名字 [行,列]”，之后每行一个元素，用 %a 格式。
- * tests/layer_ref.py 和 tests/layer_official.py 读这个输出。
+ * tests/04-layer/layer_ref.py 和 tests/04-layer/layer_official.py 读这个输出。
  *
  * 第 7 章：make gpu 用 -DUSE_GPU 另建一份（build/gpu/layer），在 GPU 上算，用法和输出格式完全相同。 */
 #include <errno.h>

@@ -41,7 +41,7 @@ JSON 头是一个对象，键是张量的名字，值描述这个张量：
 
 ## 实现
 
-代码在 [`src/st.h`](../src/st.h) 和 [`src/st.c`](../src/st.c)。读单个文件的接口只有三个函数：
+代码在 [`src/01-weights/st.h`](../src/01-weights/st.h) 和 [`src/01-weights/st.c`](../src/01-weights/st.c)。读单个文件的接口只有三个函数：
 
 ```c
 int  st_open(st_file *f, const char *path, char *err, size_t errcap);
@@ -102,13 +102,13 @@ const st_tensor *st_set_find(const st_set *s, const char *name);
 验证靠两份独立的实现互相比对。
 
 - [`tools/st_dump.c`](../tools/st_dump.c) 用我们的读取器打开文件，对每个张量输出一行：校验和、类型、形状、名字。
-- [`tests/ref_dump.py`](../tests/ref_dump.py) 用 Python 标准库里的 `json` 和 `mmap` 做同样的事，输出同样的格式。
+- [`tests/01-weights/ref_dump.py`](../tests/01-weights/ref_dump.py) 用 Python 标准库里的 `json` 和 `mmap` 做同样的事，输出同样的格式。
 
 两者的输出逐字节相同才算通过。校验和用的是 CRC-32，和 zlib、PNG、以太网用的是同一种。C 这边自己实现，查表法十几行；Python 那边直接调用标准库的 `zlib.crc32`。
 
 两份实现互相比对有一个盲区：如果两边错成一样，对拍照样通过。所以测试里还放了一个已知答案：ASCII 字符串 `123456789` 的 CRC-32 是 `cbf43926`，这是这个算法公认的测试向量，C 这边必须算出这个值。
 
-测试文件由 [`tests/make_fixtures.py`](../tests/make_fixtures.py) 生成，分两类：
+测试文件由 [`tests/01-weights/make_fixtures.py`](../tests/01-weights/make_fixtures.py) 生成，分两类：
 
 - **合法文件**。包含各种类型、零维标量、有一个维度为 0 的空张量，以及一个名字里带引号、反斜杠、换行、中文和表情符号的张量。同样的内容还会用全转义的 JSON 再写一份，两份文件读出来必须一样。
 - **分片**。把合法文件里的张量交替拆进两个分片，合并读出的结果必须与单文件完全相同，而且与传入分片的顺序无关。另有两个反例：同一个张量名出现在两个分片里，以及某个分片不存在，都必须被拒绝。

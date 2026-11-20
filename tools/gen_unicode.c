@@ -1,6 +1,6 @@
-/* gen_unicode — 从 Unicode 字符数据库（UCD）的文本文件生成 src/unicode_tables.c。
+/* gen_unicode — 从 Unicode 字符数据库（UCD）的文本文件生成 src/02-tokenizer/unicode_tables.c。
  *
- * 用法：gen_unicode <UCD 9.0 目录> <UCD 16.0 目录> > src/unicode_tables.c
+ * 用法：gen_unicode <UCD 9.0 目录> <UCD 16.0 目录> > src/02-tokenizer/unicode_tables.c
  * 9.0 目录里要有 UnicodeData.txt 和 DerivedNormalizationProps.txt，16.0 目录里只用 UnicodeData.txt。
  *
  * 为什么要两个版本：官方 tokenizers 库的 NFC 归一化内置的是 Unicode 9.0 的数据，
@@ -11,7 +11,7 @@
  *   https://www.unicode.org/Public/9.0.0/ucd/   和   https://www.unicode.org/Public/16.0.0/ucd/
  * 写作时我们的环境访问不了 unicode.org，用的是 ICU 仓库里的副本（github.com/unicode-org/icu，
  * icu4c/source/data/unidata/，标签 release-58-2 对应 9.0，release-76-1 对应 16.0）。
- * 本仓库提交的 src/unicode_tables.c 由以下文件生成（SHA-256）：
+ * 本仓库提交的 src/02-tokenizer/unicode_tables.c 由以下文件生成（SHA-256）：
  *   9.0  UnicodeData.txt                68dfc414d28257b9b5d6ddbb8b466c768c00ebdf6cbf7784364a9b6cad55ee8f
  *   9.0  DerivedNormalizationProps.txt  ba369a14c8d0ea8b7e9063991347ac698f915c393bcd5bbf26fac14f2b814ba1
  *   16.0 UnicodeData.txt                ff58e5823bd095166564a006e47d111130813dcf8bf234ef79fa51a870edb48f

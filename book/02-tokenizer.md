@@ -73,7 +73,7 @@ lower          没有了
 
 如果有两对优先级相同（同一条规则在两个位置都能用，比如 `a a a` 遇到规则 `a + a`），取最左边的那一对。
 
-代码在 [`src/tok.c`](../src/tok.c) 的 `bpe` 函数里，二十来行：每一轮扫一遍所有相邻对，查合并规则的哈希表，找到优先级最高的就合并，然后再扫一遍。一段 n 个字节的文本最多合并 n−1 轮，每轮扫 n 个位置，所以是 O(n²)。这是故意的朴素写法，第二卷再优化。
+代码在 [`src/02-tokenizer/tok.c`](../src/02-tokenizer/tok.c) 的 `bpe` 函数里，二十来行：每一轮扫一遍所有相邻对，查合并规则的哈希表，找到优先级最高的就合并，然后再扫一遍。一段 n 个字节的文本最多合并 n−1 轮，每轮扫 n 个位置，所以是 O(n²)。这是故意的朴素写法，第二卷再优化。
 
 ## 为什么是字节，以及 Ġ 是什么
 
@@ -143,7 +143,7 @@ He's got 2026 apples,  OK?\n\n  x
 
 韩文是一个特例。现代韩文的一万一千多个音节是按公式排列的：音节 = 0xAC00 + (初声 × 21 + 中声) × 28 + 终声。Unicode 数据库不把它们一个个列出来，算法里直接用公式分解和合成。
 
-实现在 [`src/unicode.c`](../src/unicode.c) 的 `uc_nfc` 里，三步各十几行。需要的数据（分解表、组合类、合成表、字符类别）由 [`tools/gen_unicode.c`](../tools/gen_unicode.c) 从 Unicode 官方的数据文件生成，存成 [`src/unicode_tables.c`](../src/unicode_tables.c) 里的几个有序数组，查询用二分查找。
+实现在 [`src/02-tokenizer/unicode.c`](../src/02-tokenizer/unicode.c) 的 `uc_nfc` 里，三步各十几行。需要的数据（分解表、组合类、合成表、字符类别）由 [`tools/gen_unicode.c`](../tools/gen_unicode.c) 从 Unicode 官方的数据文件生成，存成 [`src/02-tokenizer/unicode_tables.c`](../src/02-tokenizer/unicode_tables.c) 里的几个有序数组，查询用二分查找。
 
 ## 两个 Unicode 版本
 
@@ -191,7 +191,7 @@ Unicode 每年发布一个新版本，增加新的字符，同时更新字符的
 - **解码。** 内容本身不是 NFC 的“归一化后匹配”附加 token，0.22 及以前解码时输出原内容，0.23 起输出归一化之后的内容。我们跟 0.23 的行为，并把这类 id 从解码对拍里拿掉，因为两种行为都是“官方”的，测试结果不应该取决于机器上装的是哪个版本。这类 token 在 Qwen 的词表里没有：Qwen 的附加 token 都是 ASCII，ASCII 的 NFC 就是它自己。
 - **预分词。** 0.21.0 及以前，正则引擎认识的字符比 16.0 少，比如 Unicode 16.0 新加的埃及象形文字扩展区，它不当成字母。
 
-这件事的教训和“两个 Unicode 版本”一样：参考实现也是一个会变的东西。所以 `tests/run_tok.sh` 每次运行都先打印官方库的版本号，版本低于 0.21.4 时给出提示。真实词表的验收用的是目标机器上和模型配套的那一套环境，那里的版本号会写进验收结果。
+这件事的教训和“两个 Unicode 版本”一样：参考实现也是一个会变的东西。所以 `tests/02-tokenizer/run_tok.sh` 每次运行都先打印官方库的版本号，版本低于 0.21.4 时给出提示。真实词表的验收用的是目标机器上和模型配套的那一套环境，那里的版本号会写进验收结果。
 
 ## 附加 token
 
@@ -237,7 +237,7 @@ Unicode 每年发布一个新版本，增加新的字符，同时更新字符的
 
 ### 手写，而不是实现 Jinja
 
-Qwen3.8-27B 的模板有 174 行、9004 字节。我们没有用 C 写一个 Jinja 解释器，而是像预分词的正则那样，把这一份模板的逻辑照着手写成一个函数 `chat_render`（[`src/chat.c`](../src/chat.c)），代价同样是只认这一份模板：工具在使用前会计算模板文件的 SHA-256，与我们照着写的那一份不同就拒绝。为此我们按 FIPS 180-4 写了一个几十行的 SHA-256（[`src/sha256.c`](../src/sha256.c)）。
+Qwen3.8-27B 的模板有 174 行、9004 字节。我们没有用 C 写一个 Jinja 解释器，而是像预分词的正则那样，把这一份模板的逻辑照着手写成一个函数 `chat_render`（[`src/02-tokenizer/chat.c`](../src/02-tokenizer/chat.c)），代价同样是只认这一份模板：工具在使用前会计算模板文件的 SHA-256，与我们照着写的那一份不同就拒绝。为此我们按 FIPS 180-4 写了一个几十行的 SHA-256（[`src/02-tokenizer/sha256.c`](../src/02-tokenizer/sha256.c)）。
 
 手写之所以可行，是因为这个模板里每个标签都写成了 `{%-` 和 `{{-`，减号的意思是“吃掉这个标签前面的空白”。于是模板里为了排版而写的缩进和换行全部消失，输出恰好是所有 `{{ }}` 表达式的值依次拼接起来。`chat.c` 里每一段代码前面的注释都引用了模板里对应的那几行，可以并排对照着读。
 
@@ -258,11 +258,11 @@ Qwen3.8-27B 的模板有 174 行、9004 字节。我们没有用 C 写一个 Jin
 
 ### 对拍
 
-参考实现 [`tests/chat_ref.py`](../tests/chat_ref.py) 直接调用 transformers（我们用的是 5.23.0）的 `apply_chat_template`，执行官方的模板文件，再用 tokenizers 把结果编码成 id。C 这边的 `tok chat` 渲染并编码，两边输出同样格式的“渲染结果的十六进制加 id 序列”，模板报错的请求两边都输出 `error`。
+参考实现 [`tests/02-tokenizer/chat_ref.py`](../tests/02-tokenizer/chat_ref.py) 直接调用 transformers（我们用的是 5.23.0）的 `apply_chat_template`，执行官方的模板文件，再用 tokenizers 把结果编码成 id。C 这边的 `tok chat` 渲染并编码，两边输出同样格式的“渲染结果的十六进制加 id 序列”，模板报错的请求两边都输出 `error`。
 
 测试请求由 `make_tok_fixtures.py` 生成：19 个手写的典型对话（普通对话、关闭思考、三种思考强度、工具调用、图片和视频、各种会让模板报错的情况），加上 3000 个随机拼出来的对话。随机对话会随机地带上系统消息、工具定义、思考内容、工具调用、图片、各种空白和特殊字符，工具调用的参数里有大整数、各种量级的浮点数和嵌套结构。3019 个请求里有 242 个按模板应当报错，其余 2777 个的渲染结果逐字节一致。我们还另外用 3 万个随机对话跑过一次，也全部一致。在目标机器上，用和模型配套的 transformers 5.8.0.dev0 和模型目录里的模板文件本身再跑一遍，结果相同。
 
-模板的测试文件 [`tests/data/qwen38-27b-chat_template.jinja`](../tests/data/qwen38-27b-chat_template.jinja) 是官方文件的原样副本（Apache 2.0），这样 `make test` 不需要模型目录也能跑。这一项需要 transformers 和 jinja2 两个库（transformers 不会自动装上 jinja2），没装时测试会明确打印“跳过”。
+模板的测试文件 [`tests/02-tokenizer/data/qwen38-27b-chat_template.jinja`](../tests/02-tokenizer/data/qwen38-27b-chat_template.jinja) 是官方文件的原样副本（Apache 2.0），这样 `make test` 不需要模型目录也能跑。这一项需要 transformers 和 jinja2 两个库（transformers 不会自动装上 jinja2），没装时测试会明确打印“跳过”。
 
 ## 不信任输入
 
@@ -280,18 +280,18 @@ Qwen3.8-27B 的模板有 174 行、9004 字节。我们没有用 C 写一个 Jin
 
 编码时，输入文本必须是合法的 UTF-8，否则报错。解码时，id 必须在词表里，否则报错。在这一点上我们比官方库严格：官方库会默默跳过不认识的 id。模型输出一个不存在的 id，说明前面某个地方已经错了，不该被掩盖。
 
-为了解析 `tokenizer.json`，我们写了第二个 JSON 解析器 [`src/json.c`](../src/json.c)。第 1 章的解析器只认识 safetensors 头里会出现的几种值，这里需要完整的 JSON：布尔值、`null`、小数、任意嵌套。它把整个文件解析成一棵树。Qwen3.8 的词表和合并规则合起来约五十万项，树里大约一百多万个节点，占几十 MB 内存，可以接受。
+为了解析 `tokenizer.json`，我们写了第二个 JSON 解析器 [`src/02-tokenizer/json.c`](../src/02-tokenizer/json.c)。第 1 章的解析器只认识 safetensors 头里会出现的几种值，这里需要完整的 JSON：布尔值、`null`、小数、任意嵌套。它把整个文件解析成一棵树。Qwen3.8 的词表和合并规则合起来约五十万项，树里大约一百多万个节点，占几十 MB 内存，可以接受。
 
 ## 如何验证正确
 
 和第 1 章一样，靠两份独立的实现互相比对。
 
-- [`tools/tok.c`](../tools/tok.c) 用我们的分词器，[`tests/tok_ref.py`](../tests/tok_ref.py) 用官方 tokenizers 库，两者读同一个 `tokenizer.json`，对同一批输入产生同样格式的输出。所有文本都以十六进制输出，这样换行、空格、不合法的 UTF-8 都不会让逐行比对产生歧义。
+- [`tools/tok.c`](../tools/tok.c) 用我们的分词器，[`tests/02-tokenizer/tok_ref.py`](../tests/02-tokenizer/tok_ref.py) 用官方 tokenizers 库，两者读同一个 `tokenizer.json`，对同一批输入产生同样格式的输出。所有文本都以十六进制输出，这样换行、空格、不合法的 UTF-8 都不会让逐行比对产生歧义。
 - 对拍分五项：只做归一化、归一化加预分词、完整编码、解码（分别在跳过和保留特殊 token 两种设置下）、编码再解码。前两项把流水线的中间结果单独拿出来比，出了错能直接定位到是哪一步。
 
-测试数据由 [`tests/make_tok_fixtures.py`](../tests/make_tok_fixtures.py) 生成：
+测试数据由 [`tests/02-tokenizer/make_tok_fixtures.py`](../tests/02-tokenizer/make_tok_fixtures.py) 生成：
 
-- **一个小词表。** 用官方库在 [`tests/corpus`](../tests/corpus) 下的多语言语料上现训练一个 BPE 分词器，归一化、预分词、解码器和附加 token 的写法与 Qwen3.8 完全相同，只是词表小（约 1700 个 token）。这让测试不依赖几十 MB 的模型文件，在任何机器上几秒钟就能跑完。
+- **一个小词表。** 用官方库在 [`tests/02-tokenizer/corpus`](../tests/02-tokenizer/corpus) 下的多语言语料上现训练一个 BPE 分词器，归一化、预分词、解码器和附加 token 的写法与 Qwen3.8 完全相同，只是词表小（约 1700 个 token）。这让测试不依赖几十 MB 的模型文件，在任何机器上几秒钟就能跑完。
 - **测试文本**，约 3000 条：语料里的每一行（中文、英文、日文、韩文、俄文、阿拉伯文、印地文、泰文、代码、表情符号、组合字符），一批边界情况（空串、各种空白组合、缩写、带特殊 token 的对话格式、几千个重复字符），以及 3000 条从各个 Unicode 区块随机抽取字符拼成的字符串。
 - **测试 id**：每个 id 单独解码一次，2000 条随机 id 序列，以及测试文本编码后的序列。
 - **16 个写错的 tokenizer.json**，每个违反上面表格里的一条规则，C 实现必须以退出码 1 拒绝。

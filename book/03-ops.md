@@ -361,7 +361,7 @@ NaN（not a number，比如 0/0 的结果）是唯一需要特别说明的地方
 
 ## 各个算子
 
-代码在 [`src/ops.h`](../src/ops.h) 和 [`src/ops.c`](../src/ops.c)，每个算子都是最直接的几重循环。这里只讲容易写错的地方。
+代码在 [`src/03-ops/ops.h`](../src/03-ops/ops.h) 和 [`src/03-ops/ops.c`](../src/03-ops/ops.c)，每个算子都是最直接的几重循环。这里只讲容易写错的地方。
 
 ### 矩阵乘
 
@@ -486,9 +486,9 @@ Python 参考实现故意换了一种写法：按“往前数第几个 token”�
 
 测试的结构和前两章相同，只是比较方式从“逐字节相同”换成了“逐元素在容差内”。
 
-- [`tests/make_ops_fixtures.py`](../tests/make_ops_fixtures.py) 生成输入：每个用例一个小 safetensors 文件，装着这个算子的输入张量，再写一份用例清单。用 safetensors 是因为第 1 章的读取器现成可用，而且下一节换成真实权重时，权重本来就在 safetensors 里。
+- [`tests/03-ops/make_ops_fixtures.py`](../tests/03-ops/make_ops_fixtures.py) 生成输入：每个用例一个小 safetensors 文件，装着这个算子的输入张量，再写一份用例清单。用 safetensors 是因为第 1 章的读取器现成可用，而且下一节换成真实权重时，权重本来就在 safetensors 里。
 - [`tools/ops.c`](../tools/ops.c) 读输入、调用算子，输出结果。每个数用 C 的 `%a` 格式打印，比如 `0x1.99999ap-4`。这是十六进制的浮点数，精确无损，Python 用 `float.fromhex` 读回来。
-- [`tests/ops_ref.py`](../tests/ops_ref.py) 读同样的输入，用双精度独立地算出精确值，与 C 的输出逐元素比较，报告最大误差是多少个 ulp。
+- [`tests/03-ops/ops_ref.py`](../tests/03-ops/ops_ref.py) 读同样的输入，用双精度独立地算出精确值，与 C 的输出逐元素比较，报告最大误差是多少个 ulp。
 
 两份实现故意写得不一样：BF16 一边移位、一边按定义算；求和一边是 double 顺序累加、一边是 `math.fsum`；卷积按不同的方向索引；silu 一边是 `x / (1 + e⁻ˣ)`、一边是 `x · sigmoid(x)`，其中 sigmoid 按正负分两支算。
 
@@ -529,7 +529,7 @@ ok   拒绝 嵌入id越界：错误：第 1 个 token id 50 超出嵌入表范�
 make test-ops-real MODEL=/data/models/Qwen3.8-27B
 ```
 
-[`tests/make_ops_real.py`](../tests/make_ops_real.py) 从 `config.json` 读出 eps、theta、head_dim 和层的类型，按模型的真实维度生成激活值一侧的输入，然后对下面这些张量各跑一次算子：嵌入表（取几个普通 token、特殊 token 和最后一行填充）、第 0 层的输入归一化和最终归一化（输入是真实的嵌入行）、全注意力层的 q 归一化、线性注意力层的门控归一化、三个大矩阵（线性注意力的输入投影 10240 × 5120、全注意力的 q 投影 12288 × 5120、前馈的 down 投影 5120 × 17408）、卷积核，以及位置最大到 262143 的 RoPE。
+[`tests/03-ops/make_ops_real.py`](../tests/03-ops/make_ops_real.py) 从 `config.json` 读出 eps、theta、head_dim 和层的类型，按模型的真实维度生成激活值一侧的输入，然后对下面这些张量各跑一次算子：嵌入表（取几个普通 token、特殊 token 和最后一行填充）、第 0 层的输入归一化和最终归一化（输入是真实的嵌入行）、全注意力层的 q 归一化、线性注意力层的门控归一化、三个大矩阵（线性注意力的输入投影 10240 × 5120、全注意力的 q 投影 12288 × 5120、前馈的 down 投影 5120 × 17408）、卷积核，以及位置最大到 262143 的 RoPE。
 
 我们在目标机器上（Ryzen 9 9950X，Ubuntu 24.04，gcc 13.3，系统自带的 Python 3.12.3）用提交 `05342a9` 跑了一遍：
 

@@ -103,7 +103,7 @@ typedef struct {
 
 ## 代码
 
-代码在 [`src/model.c`](../src/model.c) 的缓存部分、[`src/sample.c`](../src/sample.c)、[`src/gen.c`](../src/gen.c) 和 [`tools/generate.c`](../tools/generate.c)。
+代码在 [`src/04-layer/model.c`](../src/04-layer/model.c) 的缓存部分、[`src/06-generate/sample.c`](../src/06-generate/sample.c)、[`src/06-generate/gen.c`](../src/06-generate/gen.c) 和 [`tools/generate.c`](../tools/generate.c)。
 
 ### 一层、整个模型都走同一份代码
 
@@ -204,14 +204,14 @@ generate <config.json> <generation_config.json> <token id，逗号分隔> <max_n
 
 我们用第 3 种（Wei 定的方案）。它包含第 2 种，又比第 1 种严格得多：只要分布对、随机数对、“随机数落在哪个 token 上”的规则对，结果就对。
 
-第一层 [`tests/gen_ref.py`](../tests/gen_ref.py) 只用标准库：
+第一层 [`tests/06-generate/gen_ref.py`](../tests/06-generate/gen_ref.py) 只用标准库：
 
 - 用 Python 再写一遍 splitmix64，开头先用 `SplittableRandom` 算出的数自检。每一步的 u 必须与 C 打印的完全相等。
 - 用 C 打印的每一行 logits 独立地做一遍温度、top-k、top-p。z = logits / T 是一次 IEEE 双精度除法，两边结果必然相同，所以排序和 top-k 的取舍可以要求完全一致；概率用 `decimal` 以 40 位有效数字算，当作精确值，C 的相对误差不超过 10⁻⁹（C 在 double 里求和，24.8 万项的舍入误差上界约 3 × 10⁻¹¹）。
 - 用精确的概率和同一个 u 做逆变换采样，选中的 token 必须与 C 相同。
 - 生成了结束符就必须停，没生成结束符就必须生成满 `max_new` 个，打印的停止原因要对。
 
-第二层 [`tests/gen_official.py`](../tests/gen_official.py) 调用官方代码：
+第二层 [`tests/06-generate/gen_official.py`](../tests/06-generate/gen_official.py) 调用官方代码：
 
 - **官方的 logits 处理器。** 对 C 打印的每一行 logits，在 float64 下依次套上 `TemperatureLogitsWarper`、`TopKLogitsWarper`、`TopPLogitsWarper`（什么条件下加哪一个、按什么顺序，照抄 `_get_logits_processor`），再做 softmax。保留的 token 必须与 C 相同，概率的相对误差不超过 10⁻⁹。这一条在真实模型上也做。
 - **官方的整条流水线（小模型）。** 构造官方的 `Qwen3_5ForCausalLM`（float64），调用它的 `generate`。官方 `generate` 用自己的缓存（预填充走分块算法，解码走逐 token 递推，与我们的写法都不同）、自己的停止条件。抽样那一步官方调用的是 `torch.multinomial`，用的是 torch 自己的随机数，我们把它临时换成一个函数：记下官方传进来的概率，返回 C 在这一步选的 token。这样官方就“照着 C 的选择”走完全程，我们检查：
@@ -252,9 +252,9 @@ generate <config.json> <generation_config.json> <token id，逗号分隔> <max_n
 
 ## 如何验证正确
 
-测试的结构和前几章相同，入口是 [`tests/run_gen.sh`](../tests/run_gen.sh)：
+测试的结构和前几章相同，入口是 [`tests/06-generate/run_gen.sh`](../tests/06-generate/run_gen.sh)：
 
-- 模型就是第 5 章的 8 层随机小模型。[`tests/make_gen_fixtures.py`](../tests/make_gen_fixtures.py) 另外写几份 `generation_config.json`：一份与 Qwen3.8-27B 的字段完全相同（温度 1.0、top-k 20、top-p 0.95，两个结束符），其余几份换成低温加 top-p、高温加 top-k、只有温度、贪心。
+- 模型就是第 5 章的 8 层随机小模型。[`tests/06-generate/make_gen_fixtures.py`](../tests/06-generate/make_gen_fixtures.py) 另外写几份 `generation_config.json`：一份与 Qwen3.8-27B 的字段完全相同（温度 1.0、top-k 20、top-p 0.95，两个结束符），其余几份换成低温加 top-p、高温加 top-k、只有温度、贪心。
 - 8 个用例：两个贪心（其中一个从 `generation_config.json` 读到 `do_sample: false`），六个采样，包括命令行覆盖参数和 70 个 token 的提示词（超过官方分块算法的块长 64）。小模型的词表只有 40，结束符 38、39 被随机选中的机会不小，所以有的用例中途因结束符停下，有的生成满个数。
 - 3 个“并列”用例：同一个模型，只把输出层的第 2i 行和第 2i + 1 行改成相同，于是每一步的 logits 都两两完全相等。检查贪心解码同分取 id 小的、top-k 为奇数时同分的两个都保留。
 - 每个用例：带缓存、`--no-cache`、`--chunk 1`、`--chunk 3` 四种跑法输出逐字节相同；第一层、第二层采样对拍；与一次前向逐位相同，这次前向再过第 5 章的逐步对拍。

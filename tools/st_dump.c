@@ -1,5 +1,5 @@
 /* st_dump — 把一个或多个分片合并后，逐个张量打印：CRC-32、dtype、形状、名字。
- * 输出格式与 tests/ref_dump.py 完全相同，两者 diff 为空即验收通过。 */
+ * 输出格式与 tests/01-weights/ref_dump.py 完全相同，两者 diff 为空即验收通过。 */
 #include <inttypes.h>
 #include <stdio.h>
 #include "st.h"

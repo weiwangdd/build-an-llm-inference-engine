@@ -1,4 +1,4 @@
-/* tok — 分词器的命令行工具，主要给测试用。输出格式与 tests/tok_ref.py 完全相同。
+/* tok — 分词器的命令行工具，主要给测试用。输出格式与 tests/02-tokenizer/tok_ref.py 完全相同。
  *
  *   tok encode  tokenizer.json texts.jsonl   每行一个 JSON 字符串，输出每行的 id 序列
  *   tok decode  tokenizer.json ids.txt       每行一串 id，输出解码结果的十六进制：
@@ -6,7 +6,7 @@
  *   tok nfc     texts.jsonl                  输出 NFC 归一化结果的十六进制
  *   tok pretok  texts.jsonl                  归一化并预分词，每段输出一个十六进制串
  *   tok chat    tokenizer.json chat_template.jinja requests.jsonl
- *                                            每行一个对话请求（见 src/chat.h），按对话模板渲染后编码；
+ *                                            每行一个对话请求（见 src/02-tokenizer/chat.h），按对话模板渲染后编码；
  *                                            输出“渲染结果的十六进制 id 序列”，模板报错的请求输出 error
  *   tok roundtrip tokenizer.json texts.jsonl 编码后再解码（保留特殊 token），输出十六进制；
  *                                            结果应当等于原文的 NFC 归一化
