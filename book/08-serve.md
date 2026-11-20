@@ -324,6 +324,8 @@ make test-serve-real MODEL=/data/models/Qwen3.8-27B PYTHON=$HOME/venvs/x/bin/pyt
 
 **`json.c` 在两个源文件列表里。** 服务端既要分词器（第 2 章的源文件列表里有 `json.c`）又要模型（第 5 章的列表里也有），合起来 `json.c` 出现两次，链接时报重复定义。Makefile 里用 `$(sort …)` 去掉重复（`sort` 顺便去重）。
 
+**云端编译通过，目标机器上不通过。** 第一次在目标机器上跑 `make test-serve-real`，`-O2` 编译服务端时 gcc 报错：`'port' may be used uninitialized`。`server_run` 里的 `int port` 由 `open_listener` 在成功时填写，失败时函数直接返回，不会用到它；但 gcc 在 `-O2` 下把 `printf` 换成了带检查的 `__printf_chk`（Ubuntu 的 gcc 默认打开 `_FORTIFY_SOURCE`），内联之后看不出这一点，就报了“可能未初始化”，加上 `-Werror` 成了错误。云端的 `make test` 用的是 `-O1`，没有触发。改成 `int port = 0`。以后新增的程序，要在云端也用 `-O2` 编一遍。
+
 **提示词比想象的长。** 用小模型试第一个请求“你好”，提示词有 161 个 token。原因是对话模板默认打开思考模式，并在最前面加上一段“思考强度”的说明（第 2 章）。关掉思考（`"chat_template_kwargs": {"enable_thinking": false}`）只剩十几个 token。
 
 ## 还没做的事

@@ -323,7 +323,7 @@ int server_run(const model *m, const gen_cfg *g, const tok *t, const server_opts
     if (o->max_conns == 0) return fail(err, cap, "max_conns 至少是 1");
     srv s = {.m = m, .g = g, .t = t, .o = o};
     if (engine_init(&s.e, m, g, o->max_batch, o->max_ctx, on_token, on_done, &s, err, cap)) return -1;
-    int port, lfd = open_listener(o, &port, err, cap);
+    int port = 0, lfd = open_listener(o, &port, err, cap);
     if (lfd < 0) { engine_free(&s.e); return -1; }
     s.c = calloc(o->max_conns, sizeof *s.c);
     struct pollfd *pf = calloc(o->max_conns + 1, sizeof *pf);
