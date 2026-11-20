@@ -8,7 +8,7 @@
 
 ## 一张图看全书
 
-下图是本书实现的 Qwen3.8-27B 从提问到回答的完整路径，颜色表示每一部分由哪一章实现（第 1 到 6 章；第 7 章把全部计算搬到 GPU 上），图中有图例和术语解释。图由 `tools/gen_architecture.py` 生成。
+下图是本书实现的 Qwen3.8-27B 从提问到回答的完整路径，颜色表示每一部分由哪一章实现（第 1 到 6 章和第 8 章；第 7 章把全部计算搬到 GPU 上），图中有图例和术语解释。图由 `tools/gen_architecture.py` 生成。
 
 ![Qwen3.8-27B 架构图，按实现的章节上色](book/images/qwen38-architecture.svg)
 
@@ -26,6 +26,7 @@
 | [第 5 章](book/05-model.md) | 整模前向（64 层、输出层、logits）与最朴素的贪心解码 | 初稿，已在 8 层随机小模型上通过两层对拍：逐步误差不超过 0.5 ulp，贪心解码的 token 与官方 transformers（float64）完全相同；在 Qwen3.8-27B 上 64 层逐层对拍通过，“中国的首都是”贪心生成的 8 个 token 与官方 float64 完全相同 |
 | [第 6 章](book/06-generate.md) | 生成循环（KV 缓存与线性注意力的状态、温度/top-k/top-p 采样、结束符） | 初稿，已在 8 层随机小模型上通过：带缓存与不带缓存逐字节相同；采样与标准库参考实现逐 token 相同，分布与官方 logits 处理器一致，官方 generate 照同样的选择走时分布一致、停在同一处；在 Qwen3.8-27B 上带缓存与不带缓存逐位相同，按对话模板提问并采样，在 `<|im_end|>` 处停下 |
 | [第 7 章](book/07-gpu.md) | 单卡 GPU 后端（朴素的 CUDA 内核：double 累加、与 CPU 相同的求和次序、关掉 FMA） | 初稿，第 3 到 6 章的全部测试换成 GPU 版后通过；GPU 的输出与 CPU 逐位相同（小模型上每层每一步，Qwen3.8-27B 上 64 层的输出和 logits），27B 每个 token 约 0.8 秒（CPU 13.3 秒） |
+| [第 8 章](book/08-serve.md) | 服务层（OpenAI 兼容的 HTTP 接口、SSE 流式输出、断开即取消、连续批处理） | 初稿，在随机小模型上：任意到达次序、批大小 1/3/8 下，每个请求的 logits、分布、随机数和 token 都与单独生成逐字节相同；HTTP 端到端测试（流式、取消、44 种写坏的请求、官方 openai 客户端）通过；在 Qwen3.8-27B 上，GPU 版服务端同时回答 4 个问题（流式与非流式、贪心与采样），每个回答与单独生成逐 token 相同，用时 43 秒（逐个单独生成合计 100 秒） |
 
 ## 构建与测试
 
@@ -39,7 +40,7 @@ python3 -m venv ~/venvs/tok      # 或者 uv venv ~/venvs/tok
 jinja2 只用于对话模板的对拍（transformers 不会自动装上它），torch 只用于第 4、5、6 章的第二层对拍；没装时对应的测试会打印“跳过”，其余测试照常运行。
 
 ```
-make test PYTHON=$HOME/venvs/tok/bin/python            # 快速测试，一两分钟
+make test PYTHON=$HOME/venvs/tok/bin/python            # 快速测试（第 1 到 8 章），几分钟
 make test-unicode PYTHON=$HOME/venvs/tok/bin/python    # 第 2 章：全部 Unicode 码点的穷举对拍，几分钟
 make test-real TOKENIZER=<模型目录>/tokenizer.json PYTHON=$HOME/venvs/tok/bin/python   # 第 2 章：在真实词表上对拍
 make test-ops-real MODEL=<模型目录>                     # 第 3 章：拿真实权重当算子输入，十几秒
@@ -58,7 +59,18 @@ make test-gpu PYTHON=$HOME/venvs/tok/bin/python            # 第 3 到 6 章的�
 make test-gpu-real MODEL=<模型目录> PYTHON=$HOME/venvs/tok/bin/python   # 第 7 章：在真实模型上验收 GPU 版，二十分钟左右
 ```
 
-想自己向模型提问，可以用 `tools/ask.sh`。它套上对话模板，用第 6 章的生成循环边生成边打印（另建一份 `-O2`、不带 ASan 的程序到 `build/fast`）。CPU 版是单线程，每个 token 约 13.5 秒，一个问题要好几分钟；加 `-G` 在 GPU 上算（第 7 章），每个 token 约 0.8 秒：
+第 8 章的服务端提供 OpenAI 兼容的接口（`POST /v1/chat/completions`，支持流式），为 OpenAI 写的客户端改一下地址就能用：
+
+```
+make gpu
+M=/data/models/Qwen3.8-27B
+build/gpu/serve $M/config.json $M/generation_config.json $M/tokenizer.json $M/chat_template.jinja $M/*.safetensors
+curl -N localhost:8000/v1/chat/completions -d '{"model":"qwen3.8-27b","stream":true,
+     "messages":[{"role":"user","content":"中国的首都是哪里？"}],"chat_template_kwargs":{"enable_thinking":false}}'
+make test-serve-real MODEL=<模型目录> PYTHON=$HOME/venvs/tok/bin/python   # 第 8 章：几个问题同时发给服务端，与逐个单独生成对拍
+```
+
+想自己向模型提问，也可以用 `tools/ask.sh`。它套上对话模板，用第 6 章的生成循环边生成边打印（另建一份 `-O2`、不带 ASan 的程序到 `build/fast`）。CPU 版是单线程，每个 token 约 13.5 秒，一个问题要好几分钟；加 `-G` 在 GPU 上算（第 7 章），每个 token 约 0.8 秒：
 
 ```
 tools/ask.sh "中国的首都是哪里？"                  # 默认用 /data/models/Qwen3.8-27B，可用 MODEL=<模型目录> 指定
