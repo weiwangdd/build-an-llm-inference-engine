@@ -1,6 +1,6 @@
 # 第 8 章 服务层
 
-> 状态：初稿。本章的代码已在随机小模型上通过全部测试：批处理时每个请求的 logits、分布、随机数和生成的 token 都与单独生成逐字节相同，HTTP 服务端的端到端测试通过；真实模型上的结果见“在真实权重上验证”一节。
+> 状态：初稿。本章的代码已在随机小模型上通过全部测试：批处理时每个请求的 logits、分布、随机数和生成的 token 都与单独生成逐字节相同，HTTP 服务端的端到端测试通过；在 Qwen3.8-27B 上，GPU 版服务端同时回答四个问题，每个回答都与单独生成逐 token 相同（见“在真实权重上验证”一节）。
 
 ## 要解决的问题
 
@@ -227,28 +227,40 @@ HTTP 的规范很长，历史上留下了很多写法：没有 `\r` 只有 `\n` 
 
 ### 一个请求的一生
 
+下面是在目标机器上用 27B 实际跑的一次（GPU 版，端口 8123；为了排版，每个 `data:` 行省略了 `id`、`created`、`model` 等重复字段，它们在每一块里都相同：`"id":"chatcmpl-0"`、`"model":"qwen3.8-27b"`）：
+
 ```
-$ curl -N localhost:8000/v1/chat/completions -d '{"model":"qwen3.8-27b", "stream":true,
+$ curl -N localhost:8123/v1/chat/completions -d '{"model":"qwen3.8-27b", "stream":true,
        "messages":[{"role":"user","content":"中国的首都是哪里？"}],
        "chat_template_kwargs":{"enable_thinking":false}}'
-data: {"id":"chatcmpl-0","object":"chat.completion.chunk","created":…,"model":"qwen3.8-27b",
-       "choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+data: {…"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
 
-data: {…"choices":[{"index":0,"delta":{"content":"中国的"},"finish_reason":null}]}
+data: {…"choices":[{"index":0,"delta":{"content":"中国"},"finish_reason":null}]}
 
-data: {…"choices":[{"index":0,"delta":{"content":"首都是"},"finish_reason":null}]}
-…
+data: {…"choices":[{"index":0,"delta":{"content":"的首"},"finish_reason":null}]}
+
+data: {…"choices":[{"index":0,"delta":{"content":"都是"},"finish_reason":null}]}
+
+data: {…"choices":[{"index":0,"delta":{"content":"北京"},"finish_reason":null}]}
+
+data: {…"choices":[{"index":0,"delta":{"content":"。"},"finish_reason":null}]}
+
 data: {…"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
 
 data: [DONE]
 ```
 
-`finish_reason` 是 `stop` 表示模型生成了结束符，`length` 表示达到了 `max_tokens`。服务端的标准错误输出里，每个请求的开始、结束（或取消）各有一行，结束那一行列出生成的全部 token id，测试用它与单独生成比较：
+每一块正好是一个 token 的文字：“的首”“都是”在这个词表里各是一个 token，所以切分看起来有点怪。`finish_reason` 是 `stop` 表示模型生成了结束符，`length` 表示达到了 `max_tokens`。这个请求没有写 `temperature`，所以照 `generation_config.json` 采样，种子默认 0；同一个请求再发一遍，回答逐字相同。
+
+服务端的标准错误输出里，每个请求的开始、结束（或取消）各有一行，结束那一行列出生成的全部 token id，测试用它与单独生成比较。上面那次请求的日志是：
 
 ```
-开始 id=0 提示词=14 max_new=4082 流式=1 采样=1 种子=0
-完成 id=0 原因=stop 提示词=14 生成=6 token=…
+开始 id=0 提示词=17 max_new=4079 流式=1 采样=1 种子=0
+完成 id=0 原因=stop 提示词=17 生成=6 token=96328,102357,96878,98116,1710,248046
+停止
 ```
+
+提示词经过对话模板是 17 个 token。请求没写 `max_tokens`，就用上下文剩下的全部长度：4096 − 17 = 4079。最后一个 token 248046 是 `<|im_end|>`，它不出现在文字里。“停止”是收到 SIGTERM 后服务端退出前的最后一行。
 
 启动服务端：
 
@@ -316,7 +328,35 @@ make test-serve-real MODEL=/data/models/Qwen3.8-27B PYTHON=$HOME/venvs/x/bin/pyt
 
 用 GPU 版（`-O2`、不带 ASan 另建）启动服务端，把几个问题同时发过去（流式与非流式、贪心与采样各半），记下总用时；再把每个问题单独交给 `generate`，要求生成的 token 逐个相同、文字等于 tokenizers 的解码，并比较两种做法的用时。
 
-（结果待在目标机器上运行后补上。）
+在目标机器（两张 RTX PRO 6000，只用第一张）上，四个问题同时发出，全部通过：
+
+| 问题 | 方式 | 生成 | 单独用时 | 回答 |
+|---|---|---|---|---|
+| 中国的首都是哪里？ | 流式，贪心 | 31 | 30 秒 | 中国的首都是\*\*北京\*\*。北京位于中国北部，是中华人民共和国的首都，也是中国的政治中心、文化中心、国际交往中心和科技创新中心。 |
+| 用一句话解释什么是大模型推理。 | 流式，采样（种子 1） | 32 | 32 秒 | 大模型推理是指利用训练好的大型语言模型，根据给定的输入（如提示词或问题）生成逻辑连贯、语义合理的输出文本的过程。 |
+| Write a haiku about the sea. | 非流式，贪心 | 21 | 23 秒 | Salt spray kisses stone, / Blue waves crash against the shore, / Silence in the foam. |
+| 1 加 1 等于几？ | 非流式，采样（种子 3） | 11 | 15 秒 | 1 加 1 等于 \*\*2\*\*。 |
+
+（第二个问题达到 `max_tokens` = 32 被截断，`finish_reason` 是 `length`；其余三个都以 `<|im_end|>` 结束。回答里的 `**` 是模型输出的 Markdown 加粗记号，原样保留。）
+
+每个回答的 token 与单独交给 `generate` 的结果逐个相同，文字与 tokenizers 的解码相同。服务端日志里前几步的批是这样的：
+
+```
+步 0 批=0:17 1:21
+步 1 批=0:1 1:1 2:20
+步 2 批=0:1 1:1 2:1 3:20
+步 3 批=0:1 1:1 2:1 3:1
+```
+
+请求是一个接一个连上来的，所以服务端每一步都把新到的请求的整段提示词和已在解码的请求的一个 token 放在同一张表里算；从第 3 步起四个请求一起解码。四个请求先后在第 9、21、29、32 步结束（日志里的 id 是服务端按连接先后编的号，与表里问题的次序不同），结束一个，批就小一个。
+
+用时：
+
+- 服务端加载权重 3 秒；四个问题从发出到全部收完 42.8 秒，共 33 步。
+- 每个问题单独用 `generate`，合计 100 秒。其中每次都要重新加载权重，扣掉这部分，单独生成每个 token 仍要约 0.8 秒（与第 7 章相同），而批处理时四个请求一步也只要约 1.3 秒。批处理不改变任何一个结果，换来的是同样的时间里多回答了几个问题。
+- 显存：加载完空闲时 51.9 GB，四个请求同时进行时峰值 53.1 GB，每个请求约 0.3 GB，绝大部分是线性注意力层的 delta 状态（48 层 × 48 个头 × 128 × 128 个 double）；全注意力层的 k、v 每个 token 只要 128 KiB，这几十个 token 微不足道。第二张卡没有用到。
+
+同一台机器上，`make test` 292 项、`make test-gpu` 272 项也全部通过。
 
 ## 踩过的坑
 
