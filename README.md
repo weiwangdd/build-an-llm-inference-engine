@@ -12,6 +12,21 @@
 
 ![Qwen3.8-27B 架构图，按实现的章节上色](book/images/qwen38-architecture.svg)
 
+## 代码在哪里
+
+引擎的源代码按章节放在 `src/` 下，每章一个目录，目录里的 README 列出这一章写了哪些文件、后面的章节又在上面加了什么。后面的章节会扩展前面的文件（例如第 6 章给第 3 章的算子加上带缓存的版本），所以一个文件放在它第一次出现的那一章。对拍测试同样按章放在 `tests/` 下，命令行工具放在 `tools/`。
+
+| 章 | 源代码 | 测试 |
+| --- | --- | --- |
+| 第 1 章 | [`src/01-weights/`](src/01-weights/) | [`tests/01-weights/`](tests/01-weights/) |
+| 第 2 章 | [`src/02-tokenizer/`](src/02-tokenizer/) | [`tests/02-tokenizer/`](tests/02-tokenizer/) |
+| 第 3 章 | [`src/03-ops/`](src/03-ops/) | [`tests/03-ops/`](tests/03-ops/) |
+| 第 4 章 | [`src/04-layer/`](src/04-layer/) | [`tests/04-layer/`](tests/04-layer/) |
+| 第 5 章 | 写在第 4 章的 `model.c` 里 | [`tests/05-model/`](tests/05-model/) |
+| 第 6 章 | [`src/06-generate/`](src/06-generate/) | [`tests/06-generate/`](tests/06-generate/) |
+| 第 7 章 | [`src/07-gpu/`](src/07-gpu/) | [`tests/07-gpu/`](tests/07-gpu/) |
+| 第 8 章 | [`src/08-serve/`](src/08-serve/) | [`tests/08-serve/`](tests/08-serve/) |
+
 ## 状态
 
 刚开始。正文和代码都是初稿，会随开发改动。

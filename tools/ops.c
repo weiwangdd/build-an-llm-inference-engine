@@ -18,7 +18,7 @@
  * 小向量 w 可以是 BF16 或 F32。
  *
  * 输出：第一行是形状，如 [2,5120]；之后每行一个元素，用 C 的 %a 格式（十六进制浮点，精确无损）。
- * 输出格式由 tests/ops_ref.py 读取并与参考值比较。
+ * 输出格式由 tests/03-ops/ops_ref.py 读取并与参考值比较。
  *
  * 第 7 章：make gpu 用 -DUSE_GPU 另建一份（build/gpu/ops），在 GPU 上算，用法和输出格式完全相同。 */
 #include <inttypes.h>

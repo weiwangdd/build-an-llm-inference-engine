@@ -53,7 +53,7 @@ logits = lm_head(x)                    [n, 248320]，权重是顶层的 lm_head.
 
 ## 代码
 
-代码在 [`src/model.c`](../src/model.c) 的后半部分和 [`tools/forward.c`](../tools/forward.c)。
+代码在 [`src/04-layer/model.c`](../src/04-layer/model.c) 的后半部分和 [`tools/forward.c`](../tools/forward.c)。
 
 `model_load` 读配置，按配置检查并加载嵌入表、64 层、最终归一化和输出层。大矩阵仍然只是指向 mmap 区域的指针（第 1 章），加载不到一秒。配置里的 `tie_word_embeddings` 在顶层和 `text_config` 里各有一份，哪一份是 true 都报错：那种模型没有单独的 `lm_head.weight`，我们没有实现。
 
@@ -105,7 +105,7 @@ forward <config.json> <token id，逗号分隔> <生成个数 m> <all|layers> <�
 
 标准答案用官方代码在 float64 下的结果（这是 Wei 定的方案）。官方 BF16 照样跑一遍，打印它选的 token 有几个和我们相同、logits 差多少，写进书里，但不影响测试通过与否。这个数在真实模型上是多少，见“在真实权重上验证”一节。
 
-第二层对拍 [`tests/model_official.py`](../tests/model_official.py) 做三件事。
+第二层对拍 [`tests/05-model/model_official.py`](../tests/05-model/model_official.py) 做三件事。
 
 **一、逐层对拍。** 对每一层 i，把 C 算出的第 i − 1 层输出交给官方的 `Qwen3_5DecoderLayer`，在 float64 下算第 i 层，和 C 的第 i 层输出比。最终归一化和输出层也一样，用 C 的上一步当输入。判定标准与第 4 章完全相同，2⁻¹²。
 
@@ -121,7 +121,7 @@ C 的贪心解码生成 m 个 token 要做 m 次前向。官方代码要不要�
 
 设提示词是 n 个 token，C 生成了 g₁ … g_m。把“提示词加上 g₁ … g_{m−1}”一次性交给官方代码（这就是教师强制），得到 n + m − 1 行 logits。因为模型是因果的，第 n − 1 行只取决于提示词本身，正好是官方生成第一个 token 时看的那一行；第 n 行只取决于提示词加 g₁，如果官方第一步也选了 g₁，这一行就正好是官方生成第二个 token 时看的那一行；依此类推。所以只要检查每一行的 argmax 都等于 C 选的那个 token，就能断定：官方自己做贪心解码，会生成完全相同的 m 个 token。一次前向，代替了 m 次。
 
-C 的工具打印的正是最后一次前向（长度 n + m − 1）的结果，所以第一层 [`tests/model_ref.py`](../tests/model_ref.py) 也按同样的办法检查：第 k 个生成的 token 必须是第 n − 2 + k 行的 argmax。最后一次前向的嵌入要求逐位相同，所以如果 C 在某一步接错了 token，嵌入那一步就对不上。
+C 的工具打印的正是最后一次前向（长度 n + m − 1）的结果，所以第一层 [`tests/05-model/model_ref.py`](../tests/05-model/model_ref.py) 也按同样的办法检查：第 k 个生成的 token 必须是第 n − 2 + k 行的 argmax。最后一次前向的嵌入要求逐位相同，所以如果 C 在某一步接错了 token，嵌入那一步就对不上。
 
 C 自己的前几次前向结果并没有打印出来，凭什么说最后一次的前几行就等于它们？这正是下面“已知答案”一节要检查的：前缀的 logits 逐位相同。
 
@@ -173,7 +173,7 @@ C 自己的前几次前向结果并没有打印出来，凭什么说最后一次
 
 测试的结构和前几章相同：
 
-- [`tests/make_model_fixtures.py`](../tests/make_model_fixtures.py) 生成一个随机小模型：8 层（两组“3 个线性注意力加 1 个全注意力”），宽 64，词表 40，加上输出层。层的配置和权重的生成方式沿用第 4 章的 [`tests/make_layer_fixtures.py`](../tests/make_layer_fixtures.py)，每一层的权重都不同，所以层用错了一定看得出来。
+- [`tests/05-model/make_model_fixtures.py`](../tests/05-model/make_model_fixtures.py) 生成一个随机小模型：8 层（两组“3 个线性注意力加 1 个全注意力”），宽 64，词表 40，加上输出层。层的配置和权重的生成方式沿用第 4 章的 [`tests/04-layer/make_layer_fixtures.py`](../tests/04-layer/make_layer_fixtures.py)，每一层的权重都不同，所以层用错了一定看得出来。
 - 用例有 1 个、8 个、70 个 token 的一次前向，以及三个贪心解码：从 1 个 token 生成 8 个，从 8 个生成 6 个，从 62 个生成 6 个（前向的长度从 62 到 67，越过官方分块算法的块长 64）。
 - 第一层 `model_ref.py` 只用标准库，每一层的步骤直接用第 4 章 `layer_ref.py` 里的 `layer_plan`：第 i 层的输入是第 i − 1 层的输出。为此把 `layer_ref.py` 的主函数拆成了两半，第 4 章的测试不受影响。
 - 第二层 `model_official.py` 需要 torch 和 transformers，没装时打印 SKIP，不算通过。

@@ -44,7 +44,7 @@
 
 ## 批处理的前向：一张表，按序列分开的三步
 
-第 6 章的 `model_step` 把一个序列的几个新 token 接在它的缓存后面算一遍。本章把它推广成一次算好几个序列（[`src/model.h`](../src/model.h)）：
+第 6 章的 `model_step` 把一个序列的几个新 token 接在它的缓存后面算一遍。本章把它推广成一次算好几个序列（[`src/04-layer/model.h`](../src/04-layer/model.h)）：
 
 ```c
 typedef struct {
@@ -69,7 +69,7 @@ int model_step_batch(const model *m, model_seq *seqs, size_t nseq, float *logits
 - **是的步骤**：嵌入、RMSNorm、矩阵乘（所有的投影和前馈层）、激活函数、门控、残差加法、RoPE（它要的位置，每一行单独给出）、最终归一化和输出层。这些步骤对整张表做一次，和第 4、5 章完全一样，只是行多了。其中矩阵乘占了几乎全部的计算量，正是批处理要省的地方：每个权重从显存里读出来一次，给 7 行用。
 - **不是的步骤**，只有三个，都是要“往前看”的：全注意力（看同一序列前面的 k、v）、因果卷积（看同一序列前面 3 个 token）、门控 delta 规则（接着同一序列的状态矩阵往下算）。这三步按序列分开，每个序列用自己的缓存，调用的仍是第 6 章的 `op_attention_past`、`op_conv1d_hist`、`op_gated_delta_state`，只是指针指向表里这个序列的那几行。
 
-以全注意力为例（[`src/model.c`](../src/model.c)，有删节）：
+以全注意力为例（[`src/04-layer/model.c`](../src/04-layer/model.c)，有删节）：
 
 ```c
 mm(qg, x, &w->q, n);                     /* 投影：整张表 */
@@ -87,13 +87,13 @@ op_sigmoid(t2, gate, n * qd);            /* 门控：整张表 */
 
 为什么逐位相同：第一类步骤的每个输出，求和的项和次序与表有几行无关；第二类步骤对每个序列做的，与它单独在 `model_step` 里做的一字不差。所以每个序列的每个中间结果都逐位相同，logits 也一样。
 
-第 4、5 章的 `layer_forward`、`model_forward` 和第 6 章的 `model_step`，现在都是它的特例：一批只有一个序列（前两者不带缓存）。所以前面各章的测试原样跑一遍，就检查了重写之后单个序列的情形没有变。GPU 版（[`src/gpu_model.c`](../src/gpu_model.c)）照同样的方式改，仍与 `model.c` 一行一行对应。
+第 4、5 章的 `layer_forward`、`model_forward` 和第 6 章的 `model_step`，现在都是它的特例：一批只有一个序列（前两者不带缓存）。所以前面各章的测试原样跑一遍，就检查了重写之后单个序列的情形没有变。GPU 版（[`src/07-gpu/gpu_model.c`](../src/07-gpu/gpu_model.c)）照同样的方式改，仍与 `model.c` 一行一行对应。
 
 有一处要小心：同一个缓存不能在一批里出现两次，否则两个序列会往同一块缓存里写。`model_step_batch` 在开始算之前检查这一点，和第 6 章的其余检查一样：检查不通过时什么都不变；中途出错时这一批的缓存都标记为损坏。
 
 ## 连续批处理：engine
 
-[`src/engine.h`](../src/engine.h) 管着所有的请求。它只有四个函数：
+[`src/08-serve/engine.h`](../src/08-serve/engine.h) 管着所有的请求。它只有四个函数：
 
 ```c
 int  engine_add(engine *e, const int32_t *prompt, size_t n, const eng_params *p, uint64_t *id, ...);
@@ -143,7 +143,7 @@ step 3 0:1 1:1 2:16 3:1 4:1 5:1 6:12 7:7
 
 ### 一个线程
 
-服务端的结构（[`src/server.c`](../src/server.c)）是一个循环，每一圈做四件事：
+服务端的结构（[`src/08-serve/server.c`](../src/08-serve/server.c)）是一个循环，每一圈做四件事：
 
 1. 用 `poll` 看哪些连接有动静。engine 里有活时不等（超时 0），只看一眼；没活时最多等 1 秒。
 2. 处理有动静的连接：收数据，收齐一个请求就解析、套模板、分词、交给 `engine_add`；可以发就把发送缓冲区里的东西发出去；客户端断开了，就 `engine_cancel` 它的请求。
@@ -160,7 +160,7 @@ step 3 0:1 1:1 2:16 3:1 4:1 5:1 6:12 7:7
 
 HTTP 的规范很长，历史上留下了很多写法：没有 `\r` 只有 `\n` 的换行、跨行的头部（下一行以空格开头表示接着上一行）、分块传输（不给出总长度，正文分成一块一块、每块先写长度）。不同的程序对这些写法理解不一致，是一类安全漏洞的来源：前面的代理认为请求在这里结束，后面的服务端认为在那里结束，攻击者就能夹带一个请求进去（这叫请求走私）。
 
-我们按本书一贯的原则处理（[`src/http.c`](../src/http.c)）：只支持用得到的那一小部分，其余一律拒绝，并给出对应的状态码。
+我们按本书一贯的原则处理（[`src/08-serve/http.c`](../src/08-serve/http.c)）：只支持用得到的那一小部分，其余一律拒绝，并给出对应的状态码。
 
 | 情况 | 状态码 |
 | --- | --- |
@@ -178,7 +178,7 @@ HTTP 的规范很长，历史上留下了很多写法：没有 `\r` 只有 `\n` 
 
 ### OpenAI 接口：认识的字段，和不认识的字段
 
-[`src/api.h`](../src/api.h) 里列出了认识的字段：
+[`src/08-serve/api.h`](../src/08-serve/api.h) 里列出了认识的字段：
 
 | 字段 | 含义 |
 | --- | --- |
@@ -276,7 +276,7 @@ build/serve $M/config.json $M/generation_config.json $M/tokenizer.json $M/chat_t
 
 测试分三部分，都在 `make test` 里。
 
-**一、批处理与单独生成逐字节相同**（[`tests/run_batch.sh`](../tests/run_batch.sh)）。用第 6 章的 8 层随机小模型（词表 40，结束符 38、39），请求清单由 [`tests/make_batch_fixtures.py`](../tests/make_batch_fixtures.py) 生成，12 个请求：
+**一、批处理与单独生成逐字节相同**（[`tests/08-serve/run_batch.sh`](../tests/08-serve/run_batch.sh)）。用第 6 章的 8 层随机小模型（词表 40，结束符 38、39），请求清单由 [`tests/08-serve/make_batch_fixtures.py`](../tests/08-serve/make_batch_fixtures.py) 生成，12 个请求：
 
 - 到达时间各不相同，最后一个在别的都结束之后才来；
 - 采样参数各不相同（贪心、Qwen 的默认参数、低温加 top-p、高温不限 top-k……）；
@@ -296,7 +296,7 @@ ok   已知答案：max_batch=8 用了 34 步，max_batch=1 用了 111 步
 
 测试还检查了日志：批里确实同时有好几个请求，预填充与解码确实在同一步里，批的大小没有超过上限。否则“全部相同”可能只是因为根本没有发生批处理。最后是 15 个写坏的输入（空清单、id 越界、温度为 0、超过上下文长度、logits 里有 NaN……），都必须以退出码 1 拒绝。
 
-**二、HTTP 端到端**（[`tests/run_serve.sh`](../tests/run_serve.sh)、[`tests/serve_test.py`](../tests/serve_test.py)）。服务端需要分词器，而小模型的词表只有 40 个 token，所以 [`tests/make_serve_fixtures.py`](../tests/make_serve_fixtures.py) 用第 2 章的办法现训练一个约 3000 token 的小词表（有 `<|im_start|>`、`<|im_end|>` 等特殊 token），再造一个词表大小与它相同的随机模型，对话模板是 27B 的那一份。随机模型几乎不会生成 `<|im_end|>`，为了测到 `finish_reason` 为 `stop`，把输出层里 `<|im_end|>` 那一行放大到 2 倍，让它每一步有百分之几的机会被选中。
+**二、HTTP 端到端**（[`tests/08-serve/run_serve.sh`](../tests/08-serve/run_serve.sh)、[`tests/08-serve/serve_test.py`](../tests/08-serve/serve_test.py)）。服务端需要分词器，而小模型的词表只有 40 个 token，所以 [`tests/08-serve/make_serve_fixtures.py`](../tests/08-serve/make_serve_fixtures.py) 用第 2 章的办法现训练一个约 3000 token 的小词表（有 `<|im_start|>`、`<|im_end|>` 等特殊 token），再造一个词表大小与它相同的随机模型，对话模板是 27B 的那一份。随机模型几乎不会生成 `<|im_end|>`，为了测到 `finish_reason` 为 `stop`，把输出层里 `<|im_end|>` 那一行放大到 2 倍，让它每一步有百分之几的机会被选中。
 
 测试（只用 Python 标准库，另用官方 tokenizers 库解码）启动服务端，通过 HTTP 发请求，检查：
 

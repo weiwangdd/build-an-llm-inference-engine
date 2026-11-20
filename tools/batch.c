@@ -12,7 +12,7 @@
  *
  * 输出：按清单的顺序，每个请求一段，先是一行 “req <i>”，之后与 generate 对这个请求的输出逐字节相同
  * （同样的选项，包括 --dump 时的 logits 和分布），被取消的最后一行是 “stop cancel”。
- * tests/run_batch.sh 拿它与 generate 逐个单独跑的结果比较。
+ * tests/08-serve/run_batch.sh 拿它与 generate 逐个单独跑的结果比较。
  * --log 把每一步这一批的组成写进文件，每行 “step <s> <请求>:<token 数> ...”。
  *
  * --max-batch 默认 4，--max-ctx 默认 max_position_embeddings。 */

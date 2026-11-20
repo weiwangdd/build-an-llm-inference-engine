@@ -11,7 +11,7 @@
  *   all     每一层的每一步都打印，名字是 layers.<i>.<步骤名>
  *   layers  只打印 embed、每一层的输出 layers.<i>.out、final_norm 和 logits（真实模型用，否则输出太多）
  * m > 0 时最后再打印一段 “greedy [1,m]”，每行一个生成的 token id（十进制）。
- * tests/model_ref.py 和 tests/model_official.py 读这个输出。
+ * tests/05-model/model_ref.py 和 tests/05-model/model_official.py 读这个输出。
  *
  * 第 7 章：make gpu 用 -DUSE_GPU 另建一份（build/gpu/forward），在 GPU 上算，用法和输出格式完全相同。 */
 #include <inttypes.h>

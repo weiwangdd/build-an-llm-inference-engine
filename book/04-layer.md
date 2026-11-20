@@ -112,8 +112,8 @@ y    = Sᵀ q / √dk
 
 代码分三处：
 
-- [`src/model.h`](../src/model.h)、[`src/model.c`](../src/model.c)：读配置、加载一层的权重、算一层的前向。
-- [`src/ops.c`](../src/ops.c)：新增四个算子。逐元素加法和乘法（残差和门控用）、线性注意力的衰减量 g、因果分组查询注意力、门控 delta 规则。
+- [`src/04-layer/model.h`](../src/04-layer/model.h)、[`src/04-layer/model.c`](../src/04-layer/model.c)：读配置、加载一层的权重、算一层的前向。
+- [`src/03-ops/ops.c`](../src/03-ops/ops.c)：新增四个算子。逐元素加法和乘法（残差和门控用）、线性注意力的衰减量 g、因果分组查询注意力、门控 delta 规则。
 - [`tools/layer.c`](../tools/layer.c)：命令行工具，算“嵌入 → 某一层 → 最终归一化”，把每一步的结果都打印出来。最终归一化本来在第 64 层之后才做，这里接在一层后面，只为了让它的权重也得到对拍。
 
 `layer_forward` 每算完一步，就调用一次调用方给的回调函数，把这一步的结果交出去：
@@ -203,7 +203,7 @@ for (size_t t = 0; t < n; t++) {
 1. **每一步都算准了吗？** 这是精度问题，标准答案用标准库 Python 按定义算，和第 3 章一样严。
 2. **公式读对了吗？** 这是语义问题，标准答案用官方代码，容差放宽到能容纳官方自己的 float32 误差。
 
-为什么第一件事不够？因为第一层的参考实现 [`tests/layer_ref.py`](../tests/layer_ref.py) 和 C 代码出自同一份对官方代码的理解。如果我们把 `1 + w` 读成了 `w`，Python 里也会写成 `w`，两边错成一样，第一层照样通过。第 3 章的 RMSNorm 测试就是这样：它保证了 `1 + w` 算得精确，却保证不了 `1 + w` 本身是对的。
+为什么第一件事不够？因为第一层的参考实现 [`tests/04-layer/layer_ref.py`](../tests/04-layer/layer_ref.py) 和 C 代码出自同一份对官方代码的理解。如果我们把 `1 + w` 读成了 `w`，Python 里也会写成 `w`，两边错成一样，第一层照样通过。第 3 章的 RMSNorm 测试就是这样：它保证了 `1 + w` 算得精确，却保证不了 `1 + w` 本身是对的。
 
 为什么第二件事不够？因为容差放宽之后，精度上的错误就看不出来了。比如矩阵乘改用 float 累加，结果比精确值差几个 ulp，和官方的 float32 误差混在一起，第二层分不出来。
 
@@ -230,7 +230,7 @@ double 递推本身的误差远小于 float 的 ulp，所以 C 的输出仍然�
 
 ### 第二层：和官方代码比
 
-[`tests/layer_official.py`](../tests/layer_official.py) 直接用 transformers 里的类：
+[`tests/04-layer/layer_official.py`](../tests/04-layer/layer_official.py) 直接用 transformers 里的类：
 
 ```python
 dec = M.Qwen3_5DecoderLayer(tc, layer)          # 一层，按配置构造
@@ -316,7 +316,7 @@ BF16 一层就差了 1% 到 3%。第 5 章把 64 层串起来时，官方 BF16 �
 
 测试的结构和前几章相同：
 
-- [`tests/make_layer_fixtures.py`](../tests/make_layer_fixtures.py) 生成一个随机小模型：4 层（3 个线性注意力、1 个全注意力），宽 64，词表 40。张量的名字、形状和配置的字段与 Qwen3.8-27B 完全相同，只是数小，所以 C 和 transformers 都能直接加载它。权重的量级按“每一层的输出与输入同量级”选；归一化权重像 27B 那样不在 0 附近（最终归一化的均值约 0.9），这样 `1 + w` 和 `w` 的区别足够明显。
+- [`tests/04-layer/make_layer_fixtures.py`](../tests/04-layer/make_layer_fixtures.py) 生成一个随机小模型：4 层（3 个线性注意力、1 个全注意力），宽 64，词表 40。张量的名字、形状和配置的字段与 Qwen3.8-27B 完全相同，只是数小，所以 C 和 transformers 都能直接加载它。权重的量级按“每一层的输出与输入同量级”选；归一化权重像 27B 那样不在 0 附近（最终归一化的均值约 0.9），这样 `1 + w` 和 `w` 的区别足够明显。
 - 用例有 1 个、8 个、70 个 token 三种长度，覆盖第 0、1、2 层（线性注意力）和第 3 层（全注意力）。70 个 token 比官方分块算法的块长 64 还长，用来检查块与块之间的衔接。
 - 第一层 `layer_ref.py` 只用标准库；第二层 `layer_official.py` 需要 torch 和 transformers，没装时打印 SKIP，不算通过。
 - 另有 30 个必须被拒绝的输入：15 个写坏的配置，8 个不存在的配置文件或写坏的命令行参数，7 个写坏的权重文件，对应“读配置”一节表格里的每一条。
@@ -348,7 +348,7 @@ ok   拒绝 q_proj少了门控：错误：张量 model.language_model.layers.3.s
 make test-layer-real MODEL=/data/models/Qwen3.8-27B PYTHON=$HOME/venvs/x/bin/python
 ```
 
-[`tests/make_layer_real.py`](../tests/make_layer_real.py) 从 `layer_types` 里挑出四层：第一个线性注意力层、第一个全注意力层、最后一个线性注意力层、最后一个全注意力层。输入是一句真实的话，“从零构建大模型推理引擎，每一步都对拍。”，用第 2 章的分词器编码。每一层的输入都是这句话的嵌入，层与层之间还不串起来（那是第 5 章）。
+[`tests/04-layer/make_layer_real.py`](../tests/04-layer/make_layer_real.py) 从 `layer_types` 里挑出四层：第一个线性注意力层、第一个全注意力层、最后一个线性注意力层、最后一个全注意力层。输入是一句真实的话，“从零构建大模型推理引擎，每一步都对拍。”，用第 2 章的分词器编码。每一层的输入都是这句话的嵌入，层与层之间还不串起来（那是第 5 章）。
 
 我们在目标机器上（32 核，186 GB 内存，Ubuntu 24.04，gcc 13.3）用提交 `aee9b4e` 跑了一遍，Python 环境里是 torch 2.9.1 和 transformers 5.8.0.dev0，也就是 `config.json` 里记录的那个版本：
 
